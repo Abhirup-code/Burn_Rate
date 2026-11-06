@@ -16,15 +16,20 @@ blocks feature deploys once the budget is gone.
 
 ## How it fits together
 
-```
-k6 load test ──> checkout service (/metrics) ──> Prometheus
-                      ▲                              │
-            chaos switch: errors / latency   SLO rules + burn-rate alerts
-                                                     │
-                    Grafana SLO dashboard <──────────┤
-                    Alertmanager: page or ticket <───┤
-                                                     ▼
-            Deploy pipeline asks "budget left?" ──> deploy, or block unless labeled hotfix
+```mermaid
+flowchart LR
+  k6[k6 load generator<br/>10 req/s] --> app[checkout service<br/>/metrics]
+  chaos[chaos switch<br/>errors, latency] -.-> app
+  app --> prom[(Prometheus)]
+  spec[slos/checkout.yaml] -- Sloth --> rules[SLO rules and<br/>burn-rate alerts]
+  rules --> prom
+  prom --> graf[Grafana<br/>SLO dashboard]
+  prom --> am[Alertmanager]
+  am -- severity=page --> pager[pager]
+  am -- severity=ticket --> tickets[ticket queue]
+  prom --> gate{deploy gate<br/>budget left?}
+  gate -- yes --> deploy[deploy]
+  gate -- no --> blocked[blocked,<br/>hotfix only]
 ```
 
 ## Roadmap
@@ -32,9 +37,9 @@ k6 load test ──> checkout service (/metrics) ──> Prometheus
 - [x] **1. Checkout service with metrics and a chaos switch**
 - [x] **2. Local Kubernetes (kind) with Prometheus and Grafana, plus steady k6 traffic**
 - [x] **3. SLOs as code and multi-window burn-rate alerts**
-- [ ] 4. Grafana SLO dashboard: budget left, burn rate, time to exhaustion
-- [ ] 5. Error-budget deploy gate in GitHub Actions, with a hotfix override
-- [ ] 6. Game day: break it on purpose, watch the alerts and the gate, write the postmortem
+- [x] **4. Grafana SLO dashboard: budget left, burn rate, time to exhaustion**
+- [x] **5. Error-budget deploy gate, with a hotfix override**
+- [x] **6. Game day: break it on purpose, watch the alerts and the gate, write the postmortem** (the drill runs in CI; the first written postmortem is next)
 
 ## SLOs as code and burn-rate alerts
 
@@ -58,9 +63,10 @@ a ticket after 20 hours but never pages, and a slowdown pages on latency only.
 ```bash
 scripts/test-slo-rules.sh       # alert unit tests, no cluster needed
 scripts/generate-slo-rules.sh   # after editing slos/checkout.yaml
+scripts/test-alert-routing.sh   # where each alert lands
 ```
 
-These need `promtool` and `yq` (`brew install prometheus yq`), and Sloth for regenerating
+These need `promtool`, `amtool`, and `yq` (`brew install prometheus alertmanager yq`), and Sloth for regenerating
 (download `sloth-darwin-arm64` from the [Sloth releases](https://github.com/slok/sloth/releases),
 rename it to `sloth`, and put it on your PATH).
 
@@ -73,6 +79,75 @@ scripts/chaos.sh 0 0                                            # recover
 ```
 
 Then open Alertmanager with `kubectl -n monitoring port-forward svc/kps-alertmanager 9093` to see it.
+
+## Dashboard
+
+Grafana loads **Checkout SLOs and error budget** automatically (Dashboards, then search "Checkout").
+
+| Panel | Answers |
+|---|---|
+| Budget left (per SLO) | How much of this month's error budget is still unspent? |
+| Burn rate (per SLO) | How fast is it being spent right now? 1 = exactly on budget, 14.4 = gone in 2 days |
+| Budget gone in (per SLO) | At this pace, when does it run out? |
+| Error ratio, burn rate over time | When did it start, and how close to the alert lines? |
+| Requests by status, p50 and p95 latency | What users actually saw |
+| Firing SLO alerts | What is paging right now |
+
+The dashboard is tested too: every panel query must use a rule Sloth records or a metric the app
+exports, and must parse in promtool, so a renamed rule cannot leave a panel quietly empty.
+
+## Alert routing
+
+Alertmanager sends `severity=page` to a **pager** receiver (reminds every hour) and
+`severity=ticket` to a **ticket** queue (once a day). While an SLO is paging, its ticket is held
+back, so one outage means one notification. The receivers are empty in the lab; add Slack,
+PagerDuty, or email in `deploy/monitoring-values.yaml` for real notifications.
+`scripts/test-alert-routing.sh` checks the routes with amtool.
+
+## The deploy gate
+
+Before a feature deploy, the gate asks Prometheus how much error budget is left:
+
+```bash
+scripts/gate.sh                                 # deploy or block
+scripts/gate.sh --hotfix "Roll back release 1.4"   # a fix, recorded
+```
+
+| Situation | Exit code | Result |
+|---|---|---|
+| Every SLO has budget left | 0 | Deploy |
+| Any SLO's budget is used up | 1 | Blocked, naming the SLO |
+| No data, or Prometheus unreachable | 2 | Blocked: the gate fails closed |
+| Blocked, but it is the fix | 0 | `--hotfix "reason"` lets it through and records who and why |
+
+It prints a Markdown report and adds it to the GitHub Actions job summary.
+
+## Game day
+
+`scripts/game-day.sh` rehearses an outage on the running lab and prints a timeline for the
+postmortem:
+
+1. The gate allows a deploy while checkout is healthy.
+2. Every checkout starts failing.
+3. The availability **page** fires.
+4. The gate **blocks** feature deploys, and lets a hotfix with a reason through.
+5. The fix goes in and the error rate drops back under budget.
+
+A real run against Prometheus with the generated rules:
+
+```
+17:41:47 UTC  Incident starts: every checkout fails
+17:42:27 UTC  Detected: CheckoutAvailabilityBudgetBurn (page) fired 40s after the first failure
+17:42:27 UTC  Deploy gate blocks feature releases: error budget exhausted
+17:42:28 UTC  Hotfix allowed through the gate with a recorded reason
+17:47:39 UTC  Recovered: 5 minute error rate back under the 0.5% budget 311s after the fix
+```
+
+The page itself clears later, once its 30 minute window recovers. That delay is deliberate: it
+keeps a flapping service from paging again and again.
+
+CI runs the whole drill on kind for every push. Write up each drill with
+[the postmortem template](docs/postmortems/TEMPLATE.md).
 
 ## The checkout service
 
@@ -184,7 +259,8 @@ docker run -p 8000:8000 -e CHAOS_TOKEN=change-me burn-rate
 
 - 13 tests cover metrics, label safety, the chaos switch, its token, and input limits.
 - CI runs lint, tests, a container build, and a smoke test on every push. Actions are pinned to commit hashes, and the workflows have read-only permissions.
-- A second workflow validates the Kubernetes manifests (kubeconform) and scripts (ShellCheck), checks the generated SLO rules match `slos/checkout.yaml`, and runs the alert unit tests. Then it **builds the whole lab on kind with the same `scripts/up.sh` you run locally**, checks that Prometheus is scraping checkout traffic with both SLOs loaded, turns on a full outage, and waits for the real **page alert to fire**.
+- Python tests cover the app, the deploy gate (including a fake Prometheus), and the dashboard.
+- A second workflow validates the Kubernetes manifests (kubeconform) and scripts (ShellCheck), checks the generated SLO rules match `slos/checkout.yaml`, and runs the alert unit tests. Then it **builds the whole lab on kind with the same `scripts/up.sh` you run locally**, checks that Prometheus is scraping checkout traffic with both SLOs loaded, and runs the full **game day**: real page alert, gate blocks, hotfix gets through, recovery.
 - The container runs as a non-root user.
 
 ## License
