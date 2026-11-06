@@ -5,6 +5,7 @@ resources:
   - namespace.yaml
   - app.yaml
   - loadgen.yaml
+  - slo-rules.yaml # generated from slos/checkout.yaml
 configMapGenerator:
   - name: loadgen-script
     files:

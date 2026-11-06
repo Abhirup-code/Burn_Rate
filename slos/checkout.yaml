@@ -1,0 +1,60 @@
+# The checkout service's SLOs, written once as code. Sloth turns this file into Prometheus
+# recording rules and multi-window, multi-burn-rate alerts: deploy/k8s/slo-rules.yaml.
+# After editing, run scripts/generate-slo-rules.sh and commit both files. CI fails if they drift.
+apiVersion: sloth.slok.dev/v1
+kind: PrometheusServiceLevel
+metadata:
+  name: checkout
+  namespace: checkout
+spec:
+  service: checkout
+  labels:
+    owner: abhirup
+  slos:
+    - name: availability
+      objective: 99.5
+      description: "99.5% of checkout requests over 30 days do not fail with a server error (5xx)."
+      sli:
+        events:
+          errorQuery: sum(rate(http_requests_total{namespace="checkout", route="/checkout", code=~"5.."}[{{.window}}]))
+          totalQuery: sum(rate(http_requests_total{namespace="checkout", route="/checkout"}[{{.window}}]))
+      alerting:
+        name: CheckoutAvailabilityBudgetBurn
+        labels:
+          category: availability
+        annotations:
+          summary: "Checkout is failing fast enough to burn the 30-day error budget early."
+          runbook_url: "https://github.com/Abhirup-code/Burn_Rate/blob/main/docs/runbooks/checkout-availability.md"
+        pageAlert:
+          labels:
+            severity: page
+        ticketAlert:
+          labels:
+            severity: ticket
+
+    - name: latency
+      objective: 95
+      description: "95% of checkout requests over 30 days finish in under 300 ms."
+      sli:
+        events:
+          # Slow requests are all requests minus the ones in the 0.3 s histogram bucket.
+          errorQuery: |
+            (
+              sum(rate(http_request_duration_seconds_count{namespace="checkout", route="/checkout"}[{{.window}}]))
+              -
+              sum(rate(http_request_duration_seconds_bucket{namespace="checkout", route="/checkout", le="0.3"}[{{.window}}]))
+            )
+          totalQuery: sum(rate(http_request_duration_seconds_count{namespace="checkout", route="/checkout"}[{{.window}}]))
+      alerting:
+        name: CheckoutLatencyBudgetBurn
+        labels:
+          category: latency
+        annotations:
+          summary: "Too many checkouts are slower than 300 ms; the latency budget is burning early."
+          runbook_url: "https://github.com/Abhirup-code/Burn_Rate/blob/main/docs/runbooks/checkout-latency.md"
+        pageAlert:
+          labels:
+            severity: page
+        ticketAlert:
+          labels:
+            severity: ticket

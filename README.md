@@ -31,10 +31,48 @@ k6 load test ──> checkout service (/metrics) ──> Prometheus
 
 - [x] **1. Checkout service with metrics and a chaos switch**
 - [x] **2. Local Kubernetes (kind) with Prometheus and Grafana, plus steady k6 traffic**
-- [ ] 3. SLOs as code and multi-window burn-rate alerts
+- [x] **3. SLOs as code and multi-window burn-rate alerts**
 - [ ] 4. Grafana SLO dashboard: budget left, burn rate, time to exhaustion
 - [ ] 5. Error-budget deploy gate in GitHub Actions, with a hotfix override
 - [ ] 6. Game day: break it on purpose, watch the alerts and the gate, write the postmortem
+
+## SLOs as code and burn-rate alerts
+
+The SLOs live in one file, [`slos/checkout.yaml`](slos/checkout.yaml). [Sloth](https://sloth.dev)
+turns it into 30 Prometheus recording rules and 4 alerts, which deploy with everything else.
+
+| Alert | Fires when | Severity |
+|---|---|---|
+| `CheckoutAvailabilityBudgetBurn` | Failures burn the 0.5% budget 14.4x too fast (1 h and 5 min windows) or 6x (6 h and 30 min) | page |
+| | Failures burn it 3x too fast (1 day and 2 h) or 1x (3 days and 6 h) | ticket |
+| `CheckoutLatencyBudgetBurn` | Same windows, for checkouts slower than 300 ms against the 5% budget | page or ticket |
+
+Every alert links to a runbook: [availability](docs/runbooks/checkout-availability.md),
+[latency](docs/runbooks/checkout-latency.md). The reasoning behind the numbers is in
+[docs/slos.md](docs/slos.md).
+
+**The alerts are tested like code.** promtool replays fake traffic with 3 days of history and checks
+exactly what fires: a healthy service stays quiet, a full outage pages at 8 minutes, a 2% leak opens
+a ticket after 20 hours but never pages, and a slowdown pages on latency only.
+
+```bash
+scripts/test-slo-rules.sh       # alert unit tests, no cluster needed
+scripts/generate-slo-rules.sh   # after editing slos/checkout.yaml
+```
+
+These need `promtool` and `yq` (`brew install prometheus yq`), and Sloth for regenerating
+(download `sloth-darwin-arm64` from the [Sloth releases](https://github.com/slok/sloth/releases),
+rename it to `sloth`, and put it on your PATH).
+
+**See an alert fire for real** on the running lab:
+
+```bash
+scripts/chaos.sh 1 0                                            # every checkout fails
+scripts/check-alert.sh CheckoutAvailabilityBudgetBurn page      # waits for the page
+scripts/chaos.sh 0 0                                            # recover
+```
+
+Then open Alertmanager with `kubectl -n monitoring port-forward svc/kps-alertmanager 9093` to see it.
 
 ## The checkout service
 
@@ -146,7 +184,7 @@ docker run -p 8000:8000 -e CHAOS_TOKEN=change-me burn-rate
 
 - 13 tests cover metrics, label safety, the chaos switch, its token, and input limits.
 - CI runs lint, tests, a container build, and a smoke test on every push. Actions are pinned to commit hashes, and the workflows have read-only permissions.
-- A second workflow validates the Kubernetes manifests (kubeconform) and scripts (ShellCheck), then **builds the whole lab on kind with the same `scripts/up.sh` you run locally**, checks that Prometheus is scraping checkout traffic, turns on chaos, and confirms the injected errors show up in the metrics.
+- A second workflow validates the Kubernetes manifests (kubeconform) and scripts (ShellCheck), checks the generated SLO rules match `slos/checkout.yaml`, and runs the alert unit tests. Then it **builds the whole lab on kind with the same `scripts/up.sh` you run locally**, checks that Prometheus is scraping checkout traffic with both SLOs loaded, turns on a full outage, and waits for the real **page alert to fire**.
 - The container runs as a non-root user.
 
 ## License

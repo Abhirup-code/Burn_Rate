@@ -1,0 +1,142 @@
+# Alert unit tests, run with scripts/test-slo-rules.sh (promtool).
+#
+# Every scenario starts with 3 days of healthy history, because the slowest alert windows look
+# back 3 days. Without that history, a short blip looks like a huge share of all traffic and
+# tickets fire that never would in production.
+#
+# Traffic is 10 checkout requests per second, so each 1 minute sample adds 600 requests.
+# 3 days = 4320 minutes, so counters reach 2592000 at the 3 day mark. Series notation: "a+bxN"
+# starts at a and adds b, N more times, so "a+0xN" holds a counter flat. ("_" would mean a
+# missing sample, which looks like the series vanished, not like zero new requests.)
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  # 1. A healthy service stays quiet: no page, no ticket.
+  - name: healthy traffic fires nothing
+    interval: 1m
+    input_series:
+      - series: 'http_requests_total{namespace="checkout", route="/checkout", method="GET", code="200"}'
+        values: '0+600x4400'
+      - series: 'http_request_duration_seconds_count{namespace="checkout", route="/checkout", method="GET"}'
+        values: '0+600x4400'
+      - series: 'http_request_duration_seconds_bucket{namespace="checkout", route="/checkout", method="GET", le="0.3"}'
+        values: '0+600x4400'
+    alert_rule_test:
+      - eval_time: 73h
+        alertname: CheckoutAvailabilityBudgetBurn
+        exp_alerts: []
+      - eval_time: 73h
+        alertname: CheckoutLatencyBudgetBurn
+        exp_alerts: []
+
+  # 2. Total outage: page within minutes, and only page (no duplicate ticket).
+  #    The 1 hour window crosses 14.4x the budget rate (7.2% errors) about 4.5 minutes in.
+  - name: a full outage pages within minutes
+    interval: 1m
+    input_series:
+      - series: 'http_requests_total{namespace="checkout", route="/checkout", method="GET", code="200"}'
+        values: '0+600x4320 2592000+0x60'
+      - series: 'http_requests_total{namespace="checkout", route="/checkout", method="GET", code="500"}'
+        values: '0x4320 600+600x59'
+      - series: 'http_request_duration_seconds_count{namespace="checkout", route="/checkout", method="GET"}'
+        values: '0+600x4380'
+      - series: 'http_request_duration_seconds_bucket{namespace="checkout", route="/checkout", method="GET", le="0.3"}'
+        values: '0+600x4380'
+    alert_rule_test:
+      # 2 minutes in: errors are real, but not enough yet to wake anyone.
+      - eval_time: 72h2m
+        alertname: CheckoutAvailabilityBudgetBurn
+        exp_alerts: []
+      # 8 minutes in: page.
+      - eval_time: 72h8m
+        alertname: CheckoutAvailabilityBudgetBurn
+        exp_alerts:
+          - exp_labels:
+              severity: page
+              sloth_severity: page
+              category: availability
+              owner: abhirup
+              sloth_id: checkout-availability
+              sloth_service: checkout
+              sloth_slo: availability
+            exp_annotations:
+              summary: "Checkout is failing fast enough to burn the 30-day error budget early."
+              runbook_url: "https://github.com/Abhirup-code/Burn_Rate/blob/main/docs/runbooks/checkout-availability.md"
+              title: "(page) checkout availability SLO error budget burn rate is too fast."
+      # Latency was fine the whole time.
+      - eval_time: 72h8m
+        alertname: CheckoutLatencyBudgetBurn
+        exp_alerts: []
+
+  # 3. A slow leak: 2% of checkouts start failing. That burns the budget 4x too fast, so the
+  #    30-day budget would be gone in about a week. Worth a ticket, never a 3 a.m. page.
+  - name: a slow leak opens a ticket but never pages
+    interval: 1m
+    input_series:
+      - series: 'http_requests_total{namespace="checkout", route="/checkout", method="GET", code="200"}'
+        values: '0+600x4320 2592588+588x1199'
+      - series: 'http_requests_total{namespace="checkout", route="/checkout", method="GET", code="500"}'
+        values: '0x4320 12+12x1199'
+      - series: 'http_request_duration_seconds_count{namespace="checkout", route="/checkout", method="GET"}'
+        values: '0+600x5520'
+      - series: 'http_request_duration_seconds_bucket{namespace="checkout", route="/checkout", method="GET", le="0.3"}'
+        values: '0+600x5520'
+    alert_rule_test:
+      # 1 hour in: nothing yet. A 2% leak is not an emergency.
+      - eval_time: 73h
+        alertname: CheckoutAvailabilityBudgetBurn
+        exp_alerts: []
+      # 20 hours in: a ticket, and still no page.
+      - eval_time: 92h
+        alertname: CheckoutAvailabilityBudgetBurn
+        exp_alerts:
+          - exp_labels:
+              severity: ticket
+              sloth_severity: ticket
+              category: availability
+              owner: abhirup
+              sloth_id: checkout-availability
+              sloth_service: checkout
+              sloth_slo: availability
+            exp_annotations:
+              summary: "Checkout is failing fast enough to burn the 30-day error budget early."
+              runbook_url: "https://github.com/Abhirup-code/Burn_Rate/blob/main/docs/runbooks/checkout-availability.md"
+              title: "(ticket) checkout availability SLO error budget burn rate is too fast."
+
+  # 4. Every checkout becomes slower than 300 ms. The latency budget (5%) is bigger than the
+  #    availability one, so it takes longer to page: the 1 hour window has to pass 72% slow,
+  #    which takes about 45 minutes of 100% slow requests.
+  - name: a slowdown pages on latency, not availability
+    interval: 1m
+    input_series:
+      - series: 'http_requests_total{namespace="checkout", route="/checkout", method="GET", code="200"}'
+        values: '0+600x4400'
+      - series: 'http_request_duration_seconds_count{namespace="checkout", route="/checkout", method="GET"}'
+        values: '0+600x4400'
+      - series: 'http_request_duration_seconds_bucket{namespace="checkout", route="/checkout", method="GET", le="0.3"}'
+        values: '0+600x4320 2592000+0x80'
+    alert_rule_test:
+      - eval_time: 72h8m
+        alertname: CheckoutLatencyBudgetBurn
+        exp_alerts: []
+      - eval_time: 72h50m
+        alertname: CheckoutLatencyBudgetBurn
+        exp_alerts:
+          - exp_labels:
+              severity: page
+              sloth_severity: page
+              category: latency
+              owner: abhirup
+              sloth_id: checkout-latency
+              sloth_service: checkout
+              sloth_slo: latency
+            exp_annotations:
+              summary: "Too many checkouts are slower than 300 ms; the latency budget is burning early."
+              runbook_url: "https://github.com/Abhirup-code/Burn_Rate/blob/main/docs/runbooks/checkout-latency.md"
+              title: "(page) checkout latency SLO error budget burn rate is too fast."
+      - eval_time: 72h50m
+        alertname: CheckoutAvailabilityBudgetBurn
+        exp_alerts: []

@@ -30,13 +30,41 @@ jobs:
             -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
             rendered.yaml
       - name: Lint shell scripts
-        run: shellcheck scripts/*.sh
+        run: shellcheck -x scripts/*.sh
+
+  slo:
+    name: SLO rules and alert tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Sloth and promtool
+        run: |
+          curl -fsSLo sloth https://github.com/slok/sloth/releases/download/v0.16.0/sloth-linux-amd64
+          echo "1cecaa50853abbb3669a928612b523df8174d258ea6f2a3c8f048e5fc5af90b2  sloth" | sha256sum --check
+          curl -fsSLo prometheus.tgz https://github.com/prometheus/prometheus/releases/download/v3.16.0/prometheus-3.16.0.linux-amd64.tar.gz
+          echo "68727009472a2c02e1ff7f062fd5b3e637285bffc8fc2d340c76fb449d6e0f34  prometheus.tgz" | sha256sum --check
+          tar xzf prometheus.tgz --strip-components=1 prometheus-3.16.0.linux-amd64/promtool
+          chmod +x sloth promtool
+          mkdir -p "$HOME/bin" && mv sloth promtool "$HOME/bin/"
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+      - name: Generated rules match slos/checkout.yaml
+        run: |
+          scripts/generate-slo-rules.sh
+          git diff --exit-code deploy/k8s/slo-rules.yaml || {
+            echo "::error::deploy/k8s/slo-rules.yaml is out of date. Run scripts/generate-slo-rules.sh and commit it."
+            exit 1
+          }
+      - name: Alert unit tests (healthy, outage, slow leak, slowdown)
+        run: scripts/test-slo-rules.sh
 
   e2e:
     name: Run the lab on kind
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: validate
+    needs: [validate, slo]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -52,10 +80,11 @@ jobs:
         run: scripts/up.sh
       - name: Prometheus is scraping checkout traffic
         run: scripts/check.sh
-      - name: The chaos switch shows up in the metrics
+      - name: A full outage shows up in the metrics and pages someone
         run: |
           scripts/chaos.sh 1 0
           scripts/check-errors.sh
+          scripts/check-alert.sh CheckoutAvailabilityBudgetBurn page 300
           scripts/chaos.sh 0 0
       - name: Show what went wrong
         if: failure()
