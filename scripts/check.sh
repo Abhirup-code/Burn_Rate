@@ -24,4 +24,5 @@ for _ in $(seq 1 60); do
 done
 echo "FAILED: up=$up served=$served" >&2
 kubectl -n checkout get pods -o wide >&2 || true
+kubectl -n checkout logs deploy/loadgen --tail 20 >&2 || true
 exit 1

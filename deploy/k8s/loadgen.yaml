@@ -7,6 +7,9 @@ metadata:
     app: loadgen
 spec:
   replicas: 1
+  # k6 has no health endpoint, so make the rollout wait 15 s: a crash at startup now fails up.sh
+  # right away instead of surfacing later as missing traffic.
+  minReadySeconds: 15
   selector:
     matchLabels:
       app: loadgen
@@ -24,7 +27,8 @@ spec:
       containers:
         - name: k6
           image: grafana/k6:2.3.0
-          args: ["run", "--quiet", "--no-summary", "/scripts/checkout.js"]
+          # k6 2.x replaced --no-summary with --summary-mode=disabled.
+          args: ["run", "--quiet", "--summary-mode=disabled", "/scripts/checkout.js"]
           env:
             - name: BASE_URL
               value: http://checkout.checkout.svc
