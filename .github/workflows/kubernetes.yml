@@ -33,22 +33,25 @@ jobs:
         run: shellcheck -x scripts/*.sh
 
   slo:
-    name: SLO rules and alert tests
+    name: SLO rules, alert tests, and routing
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Install Sloth and promtool
+      - name: Install Sloth, promtool, and amtool
         run: |
           curl -fsSLo sloth https://github.com/slok/sloth/releases/download/v0.16.0/sloth-linux-amd64
           echo "1cecaa50853abbb3669a928612b523df8174d258ea6f2a3c8f048e5fc5af90b2  sloth" | sha256sum --check
           curl -fsSLo prometheus.tgz https://github.com/prometheus/prometheus/releases/download/v3.16.0/prometheus-3.16.0.linux-amd64.tar.gz
           echo "68727009472a2c02e1ff7f062fd5b3e637285bffc8fc2d340c76fb449d6e0f34  prometheus.tgz" | sha256sum --check
           tar xzf prometheus.tgz --strip-components=1 prometheus-3.16.0.linux-amd64/promtool
-          chmod +x sloth promtool
-          mkdir -p "$HOME/bin" && mv sloth promtool "$HOME/bin/"
+          curl -fsSLo alertmanager.tgz https://github.com/prometheus/alertmanager/releases/download/v0.34.2/alertmanager-0.34.2.linux-amd64.tar.gz
+          echo "17ee14acd0f6ba6e25a436ff223d9c17ddd5cf484f543ad12f0932eaa89ba186  alertmanager.tgz" | sha256sum --check
+          tar xzf alertmanager.tgz --strip-components=1 alertmanager-0.34.2.linux-amd64/amtool
+          chmod +x sloth promtool amtool
+          mkdir -p "$HOME/bin" && mv sloth promtool amtool "$HOME/bin/"
           echo "$HOME/bin" >> "$GITHUB_PATH"
       - name: Generated rules match slos/checkout.yaml
         run: |
@@ -59,6 +62,8 @@ jobs:
           }
       - name: Alert unit tests (healthy, outage, slow leak, slowdown)
         run: scripts/test-slo-rules.sh
+      - name: Alert routing (pages to the pager, tickets to the queue)
+        run: scripts/test-alert-routing.sh
 
   e2e:
     name: Run the lab on kind

@@ -20,6 +20,41 @@ alertmanager:
       requests:
         cpu: 10m
         memory: 32Mi
+  # Routing for the SLO alerts. Tested by scripts/test-alert-routing.sh with amtool.
+  config:
+    global:
+      resolve_timeout: 5m
+    route:
+      receiver: "null"
+      group_by: [alertname, sloth_slo]
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 12h
+      routes:
+        # The chart's always-firing heartbeat alert; it proves the pipeline is alive, not a problem.
+        - receiver: "null"
+          matchers: ['alertname = "Watchdog"']
+        # Fast burn: wake someone up, and remind them every hour until it is fixed.
+        - receiver: pager
+          matchers: ['severity = "page"']
+          group_wait: 10s
+          repeat_interval: 1h
+        # Slow burn: a ticket for the next business day, reminded once a day.
+        - receiver: tickets
+          matchers: ['severity = "ticket"']
+          group_wait: 5m
+          repeat_interval: 24h
+    inhibit_rules:
+      # While an SLO is paging, its ticket for the same SLO is noise: hold it back.
+      - source_matchers: ['severity = "page"']
+        target_matchers: ['severity = "ticket"']
+        equal: [sloth_id]
+    # Named but empty receivers: the lab has no real pager or ticket system. Swap in a
+    # Slack, PagerDuty, or email config here to get real notifications.
+    receivers:
+      - name: "null"
+      - name: pager
+      - name: tickets
 
 grafana:
   defaultDashboardsTimezone: browser
