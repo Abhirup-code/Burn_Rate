@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Unit tests for the alerts: feeds Prometheus fake traffic (healthy, a slow leak, a full
-# outage, a slowdown) and checks exactly which alerts fire. No cluster needed.
+# outage, a slowdown) and checks exactly which alerts fire. Also checks that every dashboard
+# query parses. No cluster needed.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 for tool in promtool yq; do
@@ -14,4 +15,10 @@ yq '.spec' deploy/k8s/slo-rules.yaml > "$work/rules.yml"
 cp tests/slo/*_test.yaml "$work/"
 
 promtool check rules "$work/rules.yml"
+
+# Every Grafana panel query must at least parse, so a typo cannot ship an empty panel.
+yq -p json -o yaml '{"groups": [{"name": "dashboard-queries", "rules": ([.panels[].targets[]] | to_entries | map({"record": "dashboard:query_" + (.key | tostring), "expr": .value.expr}))}]}' \
+  deploy/k8s/dashboards/checkout-slo.json > "$work/dashboard-queries.yml"
+promtool check rules "$work/dashboard-queries.yml"
+
 promtool test rules "$work"/*_test.yaml
