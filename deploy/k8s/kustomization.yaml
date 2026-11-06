@@ -10,3 +10,11 @@ configMapGenerator:
   - name: loadgen-script
     files:
       - loadgen/checkout.js
+  # Grafana's sidecar loads any ConfigMap labeled grafana_dashboard=1, from any namespace.
+  - name: checkout-slo-dashboard
+    files:
+      - dashboards/checkout-slo.json
+    options:
+      disableNameSuffixHash: true
+      labels:
+        grafana_dashboard: "1"
