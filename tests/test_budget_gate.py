@@ -96,3 +96,37 @@ def test_an_unreachable_prometheus_blocks(capsys):
 
 def test_a_non_http_url_is_refused(capsys):
     assert g.main(["--prometheus", "file:///etc/passwd"]) == UNKNOWN
+
+
+def test_a_hotfix_with_a_reason_gets_through_and_is_recorded():
+    blocked = decide([Budget("availability", -0.5)])
+    d = g.apply_hotfix(blocked, "Roll back the bad 1.4 release", "abhirup")
+    assert d.code == ALLOW
+    assert d.reason.startswith(
+        "HOTFIX OVERRIDE by abhirup: Roll back the bad 1.4 release"
+    )
+    assert "Error budget exhausted for: availability" in d.reason
+    assert "Hotfix allowed while the budget is spent" in g.report(d)
+
+
+def test_a_hotfix_without_a_real_reason_stays_blocked():
+    blocked = decide([Budget("availability", -0.5)])
+    d = g.apply_hotfix(blocked, "  fix  ", "abhirup")
+    assert d.code == BLOCK
+    assert "needs a reason" in d.reason
+
+
+def test_the_hotfix_flag_changes_nothing_when_budget_is_left():
+    ok = decide([Budget("availability", 0.5)])
+    assert g.apply_hotfix(ok, "Roll back the bad 1.4 release", "abhirup") == ok
+
+
+def test_main_hotfix_from_the_environment(prometheus, monkeypatch, capsys):
+    FakePrometheus.body = {
+        "status": "success",
+        "data": {"result": [result("availability", -0.3)]},
+    }
+    monkeypatch.setenv("HOTFIX_REASON", "Revert the config that broke checkout")
+    monkeypatch.setenv("GITHUB_ACTOR", "abhirup-code")
+    assert g.main(["--prometheus", prometheus]) == ALLOW
+    assert "HOTFIX OVERRIDE by abhirup-code" in capsys.readouterr().out

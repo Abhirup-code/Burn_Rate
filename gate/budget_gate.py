@@ -6,6 +6,10 @@ is used up, feature deploys stop until reliability recovers.
 Exit codes: 0 deploy, 1 blocked, 2 could not decide (Prometheus unreachable or no
 SLO data). Code 2 also blocks: the gate fails closed.
 
+A hotfix may still go out while the budget is spent, because a reliability fix is
+exactly what a spent budget calls for. It needs --hotfix with a written reason, and
+the override is recorded in the report and the job summary for later review.
+
     python -m gate.budget_gate --prometheus http://127.0.0.1:9090 --service checkout
 """
 
@@ -81,6 +85,24 @@ def decide(budgets: list[Budget], min_remaining: float = 0.0) -> Decision:
     return Decision(ALLOW, tuple(budgets), "Every SLO has error budget left.")
 
 
+def apply_hotfix(decision: Decision, reason: str | None, who: str) -> Decision:
+    """Lets a blocked hotfix through, only with a written reason, and records who."""
+    if decision.code == ALLOW or reason is None:
+        return decision
+    reason = reason.strip()
+    if len(reason) < 10:
+        return Decision(
+            decision.code,
+            decision.budgets,
+            decision.reason + " A hotfix override needs a reason of 10+ characters.",
+        )
+    return Decision(
+        ALLOW,
+        decision.budgets,
+        f"HOTFIX OVERRIDE by {who}: {reason}. Gate said: {decision.reason}",
+    )
+
+
 def report(decision: Decision) -> str:
     """A short Markdown report, for the terminal and the GitHub Actions job summary."""
     verdict = {
@@ -88,6 +110,8 @@ def report(decision: Decision) -> str:
         BLOCK: "⛔ Deploy blocked",
         UNKNOWN: "⚠️ Deploy blocked (no data)",
     }[decision.code]
+    if decision.reason.startswith("HOTFIX OVERRIDE"):
+        verdict = "🚑 Hotfix allowed while the budget is spent"
     lines = [f"### {verdict}", "", decision.reason, ""]
     if decision.budgets:
         lines += ["| SLO | Error budget left |", "|---|---|"]
@@ -117,7 +141,14 @@ def main(argv: list[str] | None = None) -> int:
         default=0.0,
         help="Block at or below this share of budget left (default 0)",
     )
+    parser.add_argument(
+        "--hotfix",
+        metavar="REASON",
+        default=os.environ.get("HOTFIX_REASON") or None,
+        help="Deploy anyway because this is a reliability fix; the reason is recorded",
+    )
     args = parser.parse_args(argv)
+    who = os.environ.get("GITHUB_ACTOR") or os.environ.get("USER") or "unknown"
 
     try:
         decision = decide(
@@ -127,6 +158,7 @@ def main(argv: list[str] | None = None) -> int:
         decision = Decision(
             UNKNOWN, (), f"Could not read the error budget from Prometheus: {exc}"
         )
+    decision = apply_hotfix(decision, args.hotfix, who)
 
     text = report(decision)
     print(text)
