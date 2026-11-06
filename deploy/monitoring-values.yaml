@@ -1,0 +1,35 @@
+# Values for the kube-prometheus-stack chart (Prometheus, Alertmanager, Grafana).
+# Short names: services become kps-prometheus, kps-alertmanager, and kps-grafana.
+fullnameOverride: kps
+
+prometheus:
+  prometheusSpec:
+    # Pick up every ServiceMonitor and rule in the cluster, not only ones labeled for this release.
+    serviceMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    scrapeInterval: 15s
+    retention: 2d
+    resources:
+      requests:
+        cpu: 100m
+        memory: 400Mi
+
+alertmanager:
+  alertmanagerSpec:
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+
+grafana:
+  defaultDashboardsTimezone: browser
+
+# Kind does not expose these control plane parts, so scraping them only creates false alerts.
+kubeEtcd:
+  enabled: false
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeProxy:
+  enabled: false

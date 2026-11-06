@@ -1,0 +1,88 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkout
+  labels:
+    app: checkout
+spec:
+  # One replica on purpose: the chaos switch lives in memory, so every request must reach the same pod.
+  replicas: 1
+  selector:
+    matchLabels:
+      app: checkout
+  template:
+    metadata:
+      labels:
+        app: checkout
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: checkout
+          image: burn-rate:dev
+          imagePullPolicy: Never # built locally and loaded into kind
+          ports:
+            - name: http
+              containerPort: 8000
+          env:
+            - name: CHAOS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: checkout-chaos
+                  key: token
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: checkout
+  labels:
+    app: checkout
+spec:
+  selector:
+    app: checkout
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+# Tells Prometheus to scrape /metrics from the checkout service every 15 seconds.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: checkout
+  labels:
+    app: checkout
+spec:
+  selector:
+    matchLabels:
+      app: checkout
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
