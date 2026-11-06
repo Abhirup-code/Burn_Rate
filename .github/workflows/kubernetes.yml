@@ -85,12 +85,13 @@ jobs:
         run: scripts/up.sh
       - name: Prometheus is scraping checkout traffic
         run: scripts/check.sh
-      - name: A full outage shows up in the metrics and pages someone
+      - name: Game day (outage, page, deploy gate, hotfix, recovery)
+        run: scripts/game-day.sh
+      - name: Deploy gate on the live lab blocks after the outage
         run: |
-          scripts/chaos.sh 1 0
-          scripts/check-errors.sh
-          scripts/check-alert.sh CheckoutAvailabilityBudgetBurn page 300
-          scripts/chaos.sh 0 0
+          code=0
+          scripts/gate.sh || code=$?
+          [ "$code" = "1" ] || { echo "::error::The gate should block deploys after the outage (got exit $code)"; exit 1; }
       - name: Show what went wrong
         if: failure()
         run: |
