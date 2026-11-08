@@ -92,6 +92,22 @@ jobs:
           code=0
           scripts/gate.sh || code=$?
           [ "$code" = "1" ] || { echo "::error::The gate should block deploys after the outage (got exit $code)"; exit 1; }
+      - name: SLO report after the drill
+        run: |
+          scripts/slo-report.sh | tee report.md
+          cat report.md >> "$GITHUB_STEP_SUMMARY"
+          grep -q '^| availability | 99.5% | spent |' report.md ||
+            { echo "::error::The report should show the availability budget as spent"; exit 1; }
+      - name: Chaos with a duration switches itself off on the live lab
+        run: |
+          scripts/chaos.sh 0 50 5
+          sleep 8
+          kubectl -n checkout exec deploy/checkout -- python -c '
+          import json, urllib.request
+          c = json.load(urllib.request.urlopen("http://127.0.0.1:8000/chaos"))
+          assert c["latency_ms"] == 0 and c["expires_in_s"] is None, c
+          print("chaos expired:", c)
+          '
       - name: Show what went wrong
         if: failure()
         run: |

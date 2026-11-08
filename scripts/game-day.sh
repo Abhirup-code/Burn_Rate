@@ -63,6 +63,9 @@ mark "Recovered: 5 minute error rate back under the 0.5% budget $(( SECONDS - fi
 echo
 echo "Timeline (paste into docs/postmortems/):"
 printf '  %s\n' "${TIMELINE[@]}"
+if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+  { echo "### Game day timeline"; echo; echo '```'; printf '%s\n' "${TIMELINE[@]}"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+fi
 echo
 echo "Notes:"
 echo "- The page clears by itself once its 30 minute window recovers (up to about 30 minutes),"

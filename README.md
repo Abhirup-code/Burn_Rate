@@ -297,7 +297,7 @@ docker run -p 8000:8000 -e CHAOS_TOKEN=change-me burn-rate
 - App tests cover metrics, label safety, the chaos switch, its token, its expiry, and input limits.
 - CI runs lint, tests, a container build, and a smoke test on every push. Actions are pinned to commit hashes, and the workflows have read-only permissions.
 - Python tests cover the app, the deploy gate and the SLO report (both against a fake Prometheus), and the dashboard. CI fails if coverage drops under 95%.
-- A second workflow validates the Kubernetes manifests (kubeconform) and scripts (ShellCheck), checks the generated SLO rules match `slos/checkout.yaml`, and runs the alert unit tests. Then it **builds the whole lab on kind with the same `scripts/up.sh` you run locally**, checks that Prometheus is scraping checkout traffic with both SLOs loaded, and runs the full **game day**: real page alert, gate blocks, hotfix gets through, recovery.
+- A second workflow validates the Kubernetes manifests (kubeconform) and scripts (ShellCheck), checks the generated SLO rules match `slos/checkout.yaml`, and runs the alert unit tests. Then it **builds the whole lab on kind with the same `scripts/up.sh` you run locally**, checks that Prometheus is scraping checkout traffic with both SLOs loaded, and runs the full **game day**: real page alert, gate blocks, hotfix gets through, recovery. The game day timeline and the SLO report land in the job summary, and a short timed chaos run checks that experiments really switch themselves off.
 - The container runs as a non-root user.
 
 ## License
