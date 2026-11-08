@@ -28,6 +28,27 @@ def test_a_safety_margin_blocks_earlier():
     assert decide([Budget("availability", 0.12)], min_remaining=0.1).code == ALLOW
 
 
+def test_low_budget_still_deploys_but_warns_and_names_the_slo():
+    d = decide([Budget("availability", 0.12), Budget("latency", 0.9)])
+    assert d.code == ALLOW
+    assert d.low == ("availability",)
+    assert "running low for: availability" in d.reason
+    assert "Deploy allowed, budget running low" in g.report(d)
+
+
+def test_healthy_budgets_raise_no_warning():
+    d = decide([Budget("availability", 0.6)])
+    assert d.low == ()
+    assert "running low" not in g.report(d)
+
+
+def test_the_warning_threshold_is_adjustable():
+    assert decide([Budget("availability", 0.4)], warn_below=0.5).low == (
+        "availability",
+    )
+    assert decide([Budget("availability", 0.12)], warn_below=0.1).low == ()
+
+
 def test_no_data_fails_closed():
     assert decide([]).code == UNKNOWN
     assert decide([Budget("availability", float("nan"))]).code == UNKNOWN
@@ -130,3 +151,13 @@ def test_main_hotfix_from_the_environment(prometheus, monkeypatch, capsys):
     monkeypatch.setenv("GITHUB_ACTOR", "abhirup-code")
     assert g.main(["--prometheus", prometheus]) == ALLOW
     assert "HOTFIX OVERRIDE by abhirup-code" in capsys.readouterr().out
+
+
+def test_main_annotates_a_low_budget_in_github_actions(prometheus, monkeypatch, capsys):
+    FakePrometheus.body = {
+        "status": "success",
+        "data": {"result": [result("availability", 0.1)]},
+    }
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    assert g.main(["--prometheus", prometheus]) == ALLOW
+    assert "::warning title=Error budget running low::" in capsys.readouterr().out

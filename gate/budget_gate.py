@@ -3,6 +3,9 @@
 Asks Prometheus how much of each SLO's 30-day error budget is left. If any budget
 is used up, feature deploys stop until reliability recovers.
 
+Below 25% budget left (--warn-below) the deploy still goes out, with a warning, so
+the team hears about it before deploys stop.
+
 Exit codes: 0 deploy, 1 blocked, 2 could not decide (Prometheus unreachable or no
 SLO data). Code 2 also blocks: the gate fails closed.
 
@@ -38,6 +41,7 @@ class Decision:
     code: int
     budgets: tuple[Budget, ...]
     reason: str
+    low: tuple[str, ...] = ()  # SLOs still allowed, but close to running out
 
 
 def fetch_budgets(prometheus: str, service: str, timeout: float = 10.0) -> list[Budget]:
@@ -57,8 +61,11 @@ def fetch_budgets(prometheus: str, service: str, timeout: float = 10.0) -> list[
     ]
 
 
-def decide(budgets: list[Budget], min_remaining: float = 0.0) -> Decision:
-    """Blocks when any SLO has no more than min_remaining of its budget left."""
+def decide(
+    budgets: list[Budget], min_remaining: float = 0.0, warn_below: float = 0.25
+) -> Decision:
+    """Blocks when any SLO has no more than min_remaining of its budget left, and
+    flags SLOs under warn_below, so the team hears about it before deploys stop."""
     budgets = sorted(budgets, key=lambda b: b.slo)
     if not budgets:
         return Decision(
@@ -81,6 +88,15 @@ def decide(budgets: list[Budget], min_remaining: float = 0.0) -> Decision:
             BLOCK,
             tuple(budgets),
             f"Error budget exhausted for: {names}. Only reliability fixes may deploy.",
+        )
+    low = tuple(b.slo for b in budgets if b.remaining < warn_below)
+    if low:
+        return Decision(
+            ALLOW,
+            tuple(budgets),
+            f"Every SLO has error budget left, but it is running low for: "
+            f"{', '.join(low)}. Ship carefully and favor reliability work.",
+            low,
         )
     return Decision(ALLOW, tuple(budgets), "Every SLO has error budget left.")
 
@@ -112,6 +128,8 @@ def report(decision: Decision) -> str:
     }[decision.code]
     if decision.reason.startswith("HOTFIX OVERRIDE"):
         verdict = "🚑 Hotfix allowed while the budget is spent"
+    elif decision.low:
+        verdict = "🟡 Deploy allowed, budget running low"
     lines = [f"### {verdict}", "", decision.reason, ""]
     if decision.budgets:
         lines += ["| SLO | Error budget left |", "|---|---|"]
@@ -142,6 +160,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Block at or below this share of budget left (default 0)",
     )
     parser.add_argument(
+        "--warn-below",
+        type=float,
+        default=0.25,
+        help="Warn, but still allow, below this share of budget left (default 0.25)",
+    )
+    parser.add_argument(
         "--hotfix",
         metavar="REASON",
         default=os.environ.get("HOTFIX_REASON") or None,
@@ -152,7 +176,9 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         decision = decide(
-            fetch_budgets(args.prometheus, args.service), args.min_remaining
+            fetch_budgets(args.prometheus, args.service),
+            args.min_remaining,
+            args.warn_below,
         )
     except (OSError, RuntimeError, ValueError, KeyError) as exc:
         decision = Decision(
@@ -163,6 +189,9 @@ def main(argv: list[str] | None = None) -> int:
     text = report(decision)
     print(text)
     write_summary(text)
+    if decision.low and os.environ.get("GITHUB_ACTIONS") == "true":
+        # Shows up as a yellow annotation on the workflow run.
+        print(f"::warning title=Error budget running low::{decision.reason}")
     return decision.code
 
 
