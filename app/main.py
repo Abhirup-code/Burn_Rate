@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import math
 import os
 import random
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
@@ -40,16 +42,50 @@ class ChaosSettings(BaseModel):
     latency_ms: int = Field(
         0, ge=0, le=5000, description="Extra delay added to each checkout request"
     )
+    duration_s: int = Field(
+        0,
+        ge=0,
+        le=3600,
+        description="Switch chaos off by itself after this many seconds (0 = never)",
+    )
+
+
+class ChaosStatus(ChaosSettings):
+    """The chaos settings plus how long they have left, if they expire."""
+
+    expires_in_s: int | None = None
 
 
 @dataclass
 class State:
     chaos: ChaosSettings
     rng: random.Random
+    clock: Callable[[], float]
+    expires_at: float | None = None
+
+    def current(self) -> ChaosSettings:
+        """The chaos in force now. Expired chaos turns itself off, so a forgotten
+        experiment cannot keep burning the error budget."""
+        if self.expires_at is not None and self.clock() >= self.expires_at:
+            self.chaos = ChaosSettings()
+            self.expires_at = None
+        return self.chaos
+
+    def status(self) -> ChaosStatus:
+        chaos = self.current()
+        left = None
+        if self.expires_at is not None:
+            left = max(0, math.ceil(self.expires_at - self.clock()))
+        return ChaosStatus(**chaos.model_dump(), expires_in_s=left)
 
 
-def create_app(chaos_token: str | None = None, seed: int | None = None) -> FastAPI:
-    """Build the app. Tests pass a token and a seed; production reads CHAOS_TOKEN."""
+def create_app(
+    chaos_token: str | None = None,
+    seed: int | None = None,
+    clock: Callable[[], float] = time.monotonic,
+) -> FastAPI:
+    """Build the app. Tests pass a token, a seed, and a clock; production reads
+    CHAOS_TOKEN."""
     token = (
         chaos_token if chaos_token is not None else os.environ.get("CHAOS_TOKEN", "")
     )
@@ -67,7 +103,7 @@ def create_app(chaos_token: str | None = None, seed: int | None = None) -> FastA
         buckets=LATENCY_BUCKETS,
         registry=registry,
     )
-    state = State(chaos=ChaosSettings(), rng=random.Random(seed))  # noqa: S311 (chaos, not crypto)
+    state = State(ChaosSettings(), random.Random(seed), clock)  # noqa: S311 (chaos, not crypto)
     app = FastAPI(title="Burn Rate checkout service", version="0.1.0")
 
     @app.middleware("http")
@@ -98,7 +134,7 @@ def create_app(chaos_token: str | None = None, seed: int | None = None) -> FastA
 
     @app.get("/checkout")
     async def checkout() -> dict[str, str]:
-        chaos = state.chaos
+        chaos = state.current()
         if chaos.latency_ms:
             await asyncio.sleep(chaos.latency_ms / 1000)
         if chaos.error_rate and state.rng.random() < chaos.error_rate:
@@ -106,13 +142,16 @@ def create_app(chaos_token: str | None = None, seed: int | None = None) -> FastA
         return {"status": "paid"}
 
     @app.get("/chaos")
-    async def get_chaos() -> ChaosSettings:
-        return state.chaos
+    async def get_chaos() -> ChaosStatus:
+        return state.status()
 
     @app.put("/chaos", dependencies=[Depends(require_token)])
-    async def set_chaos(settings: ChaosSettings) -> ChaosSettings:
+    async def set_chaos(settings: ChaosSettings) -> ChaosStatus:
         state.chaos = settings
-        return state.chaos
+        state.expires_at = (
+            state.clock() + settings.duration_s if settings.duration_s else None
+        )
+        return state.status()
 
     @app.get("/metrics")
     async def metrics() -> Response:

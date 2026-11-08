@@ -30,7 +30,8 @@ for attempt in $(seq 1 18); do
 done
 
 mark "Incident starts: every checkout fails (scripts/chaos.sh 1 0)"
-scripts/chaos.sh 1 0 >/dev/null
+# 15 minutes is a safety net: if this script dies, the chaos still ends by itself.
+scripts/chaos.sh 1 0 900 >/dev/null
 started=$SECONDS
 
 until positive "$(firing)"; do

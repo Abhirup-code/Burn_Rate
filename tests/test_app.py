@@ -72,7 +72,12 @@ def test_chaos_needs_the_token(client):
         ).status_code
         == 401
     )
-    assert client.get("/chaos").json() == {"error_rate": 0.0, "latency_ms": 0}
+    assert client.get("/chaos").json() == {
+        "error_rate": 0.0,
+        "latency_ms": 0,
+        "duration_s": 0,
+        "expires_in_s": None,
+    }
 
 
 def test_chaos_is_locked_when_no_token_is_configured():
@@ -121,7 +126,14 @@ def test_injected_latency_slows_checkout(client):
 
 
 @pytest.mark.parametrize(
-    "bad", [{"error_rate": 1.5}, {"error_rate": -0.1}, {"latency_ms": 99999}]
+    "bad",
+    [
+        {"error_rate": 1.5},
+        {"error_rate": -0.1},
+        {"latency_ms": 99999},
+        {"duration_s": -1},
+        {"duration_s": 7200},
+    ],
 )
 def test_out_of_range_chaos_is_rejected(client, bad):
     assert client.put("/chaos", json=bad, headers=AUTH).status_code == 422
@@ -131,3 +143,43 @@ def test_turning_chaos_off_restores_health(client):
     client.put("/chaos", json={"error_rate": 1}, headers=AUTH)
     client.put("/chaos", json={"error_rate": 0, "latency_ms": 0}, headers=AUTH)
     assert client.get("/checkout").status_code == 200
+
+
+class FakeClock:
+    def __init__(self):
+        self.now = 1000.0
+
+    def __call__(self):
+        return self.now
+
+
+def test_chaos_with_a_duration_switches_itself_off():
+    clock = FakeClock()
+    timed = TestClient(create_app(chaos_token=TOKEN, seed=1, clock=clock))
+    body = timed.put(
+        "/chaos", json={"error_rate": 1, "duration_s": 60}, headers=AUTH
+    ).json()
+    assert body["expires_in_s"] == 60
+    assert timed.get("/checkout").status_code == 500
+
+    clock.now += 59.5
+    assert timed.get("/chaos").json()["expires_in_s"] == 1
+    assert timed.get("/checkout").status_code == 500
+
+    clock.now += 1
+    assert timed.get("/checkout").status_code == 200
+    assert timed.get("/chaos").json() == {
+        "error_rate": 0.0,
+        "latency_ms": 0,
+        "duration_s": 0,
+        "expires_in_s": None,
+    }
+
+
+def test_chaos_without_a_duration_stays_on():
+    clock = FakeClock()
+    timed = TestClient(create_app(chaos_token=TOKEN, seed=1, clock=clock))
+    timed.put("/chaos", json={"error_rate": 1}, headers=AUTH)
+    clock.now += 86400
+    assert timed.get("/checkout").status_code == 500
+    assert timed.get("/chaos").json()["expires_in_s"] is None

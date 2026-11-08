@@ -157,7 +157,7 @@ CI runs the whole drill on kind for every push. Write up each drill with
 | `GET /healthz` | Health check for Kubernetes. Not counted as user traffic |
 | `GET /metrics` | Prometheus metrics |
 | `GET /chaos` | Shows the current chaos settings |
-| `PUT /chaos` | Makes checkout fail or slow down on purpose. Needs `Authorization: Bearer $CHAOS_TOKEN` |
+| `PUT /chaos` | Makes checkout fail or slow down on purpose. Needs `Authorization: Bearer $CHAOS_TOKEN`. Add `duration_s` and it switches itself off after that many seconds |
 
 Metrics the SLOs are built on:
 
@@ -169,6 +169,7 @@ Design choices:
 - **Labels use the route template, not the raw URL.** Unknown paths all share `route="unmatched"`, so a scanner hitting random URLs cannot create thousands of time series.
 - **Health checks and metric scrapes are left out** of the numbers, because they are not user traffic and would make the service look more reliable than it is.
 - **Chaos is locked unless a token is set**, and the token is compared in constant time.
+- **Chaos can expire.** With `duration_s`, an experiment ends by itself, so one forgotten on a Friday cannot burn the whole error budget over the weekend.
 
 ## Run the whole lab on Kubernetes
 
@@ -205,6 +206,7 @@ kubectl -n monitoring port-forward svc/kps-grafana 3000:80
 scripts/chaos.sh 0.05 0     # 5% of checkouts fail
 scripts/chaos.sh 0 400      # every checkout takes 400 ms more
 scripts/chaos.sh 0 0        # healthy again
+scripts/chaos.sh 0.05 0 600 # 5% fail for 10 minutes, then it heals by itself
 ```
 
 **Check it end to end, or tear it down:**
@@ -257,7 +259,7 @@ docker run -p 8000:8000 -e CHAOS_TOKEN=change-me burn-rate
 
 ## Quality
 
-- 13 tests cover metrics, label safety, the chaos switch, its token, and input limits.
+- App tests cover metrics, label safety, the chaos switch, its token, its expiry, and input limits.
 - CI runs lint, tests, a container build, and a smoke test on every push. Actions are pinned to commit hashes, and the workflows have read-only permissions.
 - Python tests cover the app, the deploy gate (including a fake Prometheus), and the dashboard.
 - A second workflow validates the Kubernetes manifests (kubeconform) and scripts (ShellCheck), checks the generated SLO rules match `slos/checkout.yaml`, and runs the alert unit tests. Then it **builds the whole lab on kind with the same `scripts/up.sh` you run locally**, checks that Prometheus is scraping checkout traffic with both SLOs loaded, and runs the full **game day**: real page alert, gate blocks, hotfix gets through, recovery.
