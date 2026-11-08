@@ -96,6 +96,23 @@ Grafana loads **Checkout SLOs and error budget** automatically (Dashboards, then
 The dashboard is tested too: every panel query must use a rule Sloth records or a metric the app
 exports, and must parse in promtool, so a renamed rule cannot leave a panel quietly empty.
 
+### SLO report
+
+One table with where every SLO stands, for a weekly review or an incident channel:
+
+```bash
+scripts/slo-report.sh
+```
+
+```
+| SLO | Objective | State | Budget left | Burn 5m | Burn 1h | Burn 6h | Burn 1d | Burn 3d | Budget gone in | Alerts |
+| availability | 99.5% | low | 20.0% | 100.0x | 10.0x | 10.0x | 10.0x | 10.0x | 1h 26m | page |
+| latency | 95.0% | ok | 97.0% | 0.0x | 0.0x | 0.0x | 0.0x | 0.0x | not at this pace | none |
+```
+
+The burn columns are the same windows the alerts use, so you can see which alert is close to firing.
+The numbers above are from the report's unit test, not a real run.
+
 ## Alert routing
 
 Alertmanager sends `severity=page` to a **pager** receiver (reminds every hour) and
