@@ -137,6 +137,27 @@ def report(decision: Decision) -> str:
     return "\n".join(lines) + "\n"
 
 
+def as_json(decision: Decision) -> str:
+    """The decision for other tools: a pipeline step, a chat bot, a dashboard."""
+    return json.dumps(
+        {
+            "decision": {ALLOW: "allow", BLOCK: "block", UNKNOWN: "unknown"}[
+                decision.code
+            ],
+            "exit_code": decision.code,
+            "hotfix": decision.reason.startswith("HOTFIX OVERRIDE"),
+            "reason": decision.reason,
+            # NaN (no data yet) is not valid JSON, so it becomes null.
+            "budget_left": {
+                b.slo: None if b.remaining != b.remaining else b.remaining
+                for b in decision.budgets
+            },
+            "running_low": list(decision.low),
+        },
+        allow_nan=False,
+    )
+
+
 def write_summary(text: str) -> None:
     path = os.environ.get("GITHUB_STEP_SUMMARY")
     if path:
@@ -171,6 +192,11 @@ def main(argv: list[str] | None = None) -> int:
         default=os.environ.get("HOTFIX_REASON") or None,
         help="Deploy anyway because this is a reliability fix; the reason is recorded",
     )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Print the decision as JSON instead of Markdown (the job summary stays)",
+    )
     args = parser.parse_args(argv)
     who = os.environ.get("GITHUB_ACTOR") or os.environ.get("USER") or "unknown"
 
@@ -187,7 +213,7 @@ def main(argv: list[str] | None = None) -> int:
     decision = apply_hotfix(decision, args.hotfix, who)
 
     text = report(decision)
-    print(text)
+    print(as_json(decision) if args.json else text)
     write_summary(text)
     if decision.low and os.environ.get("GITHUB_ACTIONS") == "true":
         # Shows up as a yellow annotation on the workflow run.

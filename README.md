@@ -121,7 +121,12 @@ scripts/gate.sh --hotfix "Roll back release 1.4"   # a fix, recorded
 | No data, or Prometheus unreachable | 2 | Blocked: the gate fails closed |
 | Blocked, but it is the fix | 0 | `--hotfix "reason"` lets it through and records who and why |
 
-It prints a Markdown report and adds it to the GitHub Actions job summary.
+It prints a Markdown report and adds it to the GitHub Actions job summary. Add `--json` for a
+machine-readable answer, for example to feed a chat bot or another pipeline step:
+
+```bash
+scripts/gate.sh --json | jq -r .decision        # allow, block, or unknown
+```
 
 ## Game day
 

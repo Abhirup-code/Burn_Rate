@@ -161,3 +161,35 @@ def test_main_annotates_a_low_budget_in_github_actions(prometheus, monkeypatch, 
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
     assert g.main(["--prometheus", prometheus]) == ALLOW
     assert "::warning title=Error budget running low::" in capsys.readouterr().out
+
+
+def test_json_output_for_other_tools(prometheus, capsys):
+    FakePrometheus.body = {
+        "status": "success",
+        "data": {"result": [result("availability", -0.5), result("latency", 0.2)]},
+    }
+    assert g.main(["--prometheus", prometheus, "--json"]) == BLOCK
+    out = json.loads(capsys.readouterr().out)
+    assert out == {
+        "decision": "block",
+        "exit_code": 1,
+        "hotfix": False,
+        "reason": "Error budget exhausted for: availability. "
+        "Only reliability fixes may deploy.",
+        "budget_left": {"availability": -0.5, "latency": 0.2},
+        "running_low": [],
+    }
+
+
+def test_json_turns_missing_data_into_null():
+    d = decide([Budget("availability", float("nan"))])
+    out = json.loads(g.as_json(d))
+    assert out["decision"] == "unknown"
+    assert out["budget_left"] == {"availability": None}
+
+
+def test_json_marks_a_hotfix():
+    d = g.apply_hotfix(
+        decide([Budget("availability", -0.5)]), "Roll back release 1.4", "abhirup"
+    )
+    assert json.loads(g.as_json(d))["hotfix"] is True
