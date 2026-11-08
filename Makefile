@@ -19,8 +19,8 @@ format: ## Format the Python code
 	$(PYTHON) -m ruff format .
 	$(PYTHON) -m ruff check --fix .
 
-test: ## Unit tests: app, gate, report, dashboard
-	$(PYTHON) -m pytest -q
+test: ## Unit tests with coverage (fails under 95%)
+	$(PYTHON) -m pytest -q --cov
 
 rules: ## Regenerate the SLO rules from slos/checkout.yaml (needs sloth)
 	scripts/generate-slo-rules.sh

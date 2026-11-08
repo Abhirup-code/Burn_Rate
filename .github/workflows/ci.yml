@@ -27,8 +27,8 @@ jobs:
         run: |
           ruff check .
           ruff format --check .
-      - name: Test
-        run: pytest -q
+      - name: Test, with at least 95% coverage
+        run: pytest -q --cov
 
   image:
     name: Build the container
