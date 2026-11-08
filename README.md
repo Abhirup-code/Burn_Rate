@@ -7,6 +7,18 @@ small checkout service the way an SRE team runs production: it sets a reliabilit
 how much failure that target allows (the error budget), pages someone when the budget burns too fast, and
 blocks feature deploys once the budget is gone.
 
+## Quick start
+
+Every command has a `make` shortcut. Run `make` to list them:
+
+```bash
+make ci          # lint, unit tests, alert tests, routing tests. No cluster needed
+make up          # start the lab on kind
+make game-day    # break it, watch it page, print the timeline
+make report      # where every SLO stands
+make down        # delete the lab
+```
+
 ## The targets
 
 | SLO | Target | Window | Error budget |
