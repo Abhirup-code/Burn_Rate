@@ -103,6 +103,12 @@ def create_app(
         buckets=LATENCY_BUCKETS,
         registry=registry,
     )
+    # Start the checkout success and failure series at 0. A counter series only
+    # appears once something increments it, so a fresh service had no 5xx series,
+    # the availability SLI had no data, and the deploy gate saw only the latency
+    # SLO until the first failure.
+    for code in ("200", "500"):
+        requests_total.labels("/checkout", "GET", code)
     state = State(ChaosSettings(), random.Random(seed), clock)  # noqa: S311 (chaos, not crypto)
     app = FastAPI(title="Burn Rate checkout service", version="0.1.0")
 

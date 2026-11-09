@@ -183,3 +183,11 @@ def test_chaos_without_a_duration_stays_on():
     clock.now += 86400
     assert timed.get("/checkout").status_code == 500
     assert timed.get("/chaos").json()["expires_in_s"] is None
+
+
+def test_checkout_failure_series_exists_before_any_failure():
+    """Without it, the availability SLI has no data on a fresh service."""
+    fresh = TestClient(create_app(chaos_token=TOKEN, seed=1))
+    body = fresh.get("/metrics").text
+    assert 'http_requests_total{code="500",method="GET",route="/checkout"} 0.0' in body
+    assert 'http_requests_total{code="200",method="GET",route="/checkout"} 0.0' in body
