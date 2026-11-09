@@ -43,7 +43,17 @@ if ! kubectl -n checkout get secret checkout-chaos >/dev/null 2>&1; then
   kubectl -n checkout create secret generic checkout-chaos \
     --from-literal=token="$(openssl rand -hex 16)"
 fi
-kubectl apply -k deploy/k8s
+# On a busy laptop the API server can time out mid-apply ("etcdserver: request timed out"),
+# which left half the lab missing in the first game day. Apply is safe to repeat, so retry.
+for attempt in 1 2 3; do
+  kubectl apply -k deploy/k8s && break
+  if [ "$attempt" = 3 ]; then
+    echo "kubectl apply failed 3 times. Is Docker short on memory? See docs/postmortems/." >&2
+    exit 1
+  fi
+  echo "==> kubectl apply failed, retrying in 10 seconds (attempt $attempt of 3)"
+  sleep 10
+done
 kubectl -n checkout rollout restart deployment/checkout >/dev/null # pick up a rebuilt image
 kubectl -n checkout rollout status deployment/checkout --timeout 180s
 kubectl -n checkout rollout status deployment/loadgen --timeout 180s
