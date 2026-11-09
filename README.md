@@ -1,5 +1,9 @@
 # Burn Rate
 
+[![CI](https://github.com/Abhirup-code/Burn_Rate/actions/workflows/ci.yml/badge.svg)](https://github.com/Abhirup-code/Burn_Rate/actions/workflows/ci.yml)
+[![Kubernetes](https://github.com/Abhirup-code/Burn_Rate/actions/workflows/kubernetes.yml/badge.svg)](https://github.com/Abhirup-code/Burn_Rate/actions/workflows/kubernetes.yml)
+[![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+
 **SLOs, burn-rate alerts, and an error-budget deploy gate on Kubernetes.**
 
 Teams argue about whether a service is "reliable enough" without numbers to settle it. Burn Rate runs a
