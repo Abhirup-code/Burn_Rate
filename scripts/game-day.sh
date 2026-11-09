@@ -40,8 +40,15 @@ until positive "$(firing)"; do
 done
 mark "Detected: $ALERT (page) fired $(( SECONDS - started ))s after the first failure"
 
-set +e; gate; code=$?; set -e
-[ "$code" = "1" ] || { echo "FAILED: the gate should block feature deploys now (got exit $code)" >&2; exit 1; }
+# The budget is a recording rule with its own evaluation interval, so it can trail the
+# page by a cycle. Give it up to a minute to catch up before calling it a failure.
+for attempt in $(seq 1 6); do
+  set +e; out=$(gate); code=$?; set -e
+  [ "$code" = "1" ] && break
+  (( attempt < 6 )) || { echo "$out"; echo "FAILED: the gate should block feature deploys now (got exit $code)" >&2; exit 1; }
+  sleep 10
+done
+echo "$out"
 mark "Deploy gate blocks feature releases: error budget exhausted"
 
 gate --hotfix "Game day: turn the chaos switch back off" >/dev/null ||
