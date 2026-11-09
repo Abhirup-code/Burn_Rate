@@ -11,6 +11,12 @@ small checkout service the way an SRE team runs production: it sets a reliabilit
 how much failure that target allows (the error budget), pages someone when the budget burns too fast, and
 blocks feature deploys once the budget is gone.
 
+![Grafana dashboard during my first game day: availability errors spike to 50%, the burn rate passes the 14.4x page line, then both drop back after the fix](docs/images/game-day-dashboard.png)
+
+*My first [game day](docs/postmortems/2026-11-09-game-day-checkout-outage.md) on a laptop with kind.
+At 14:25 every checkout fails: the error ratio jumps, the burn rate shoots past the dashed page line,
+and both fall back after the fix. The later latency spikes were not part of the drill.*
+
 ## Quick start
 
 Every command has a `make` shortcut. Run `make` to list them:

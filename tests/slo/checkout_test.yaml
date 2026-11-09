@@ -71,6 +71,18 @@ tests:
         alertname: CheckoutLatencyBudgetBurn
         exp_alerts: []
 
+    # The dashboard's "budget gone in" panels must return a value. They once showed
+    # "No data", because the two rules they divide carry different sloth_window labels.
+    promql_expr_test:
+      - expr: count(clamp_min(slo:period_error_budget_remaining:ratio{sloth_service="checkout", sloth_slo="availability"}, 0) * 2592000 / on(sloth_service, sloth_slo) clamp_min(slo:current_burn_rate:ratio{sloth_service="checkout", sloth_slo="availability"}, 0.001))
+        eval_time: 72h8m
+        exp_samples:
+          - value: 1
+      - expr: count(clamp_min(slo:period_error_budget_remaining:ratio{sloth_service="checkout", sloth_slo="latency"}, 0) * 2592000 / on(sloth_service, sloth_slo) clamp_min(slo:current_burn_rate:ratio{sloth_service="checkout", sloth_slo="latency"}, 0.001))
+        eval_time: 72h8m
+        exp_samples:
+          - value: 1
+
   # 3. A slow leak: 2% of checkouts start failing. That burns the budget 4x too fast, so the
   #    30-day budget would be gone in about a week. Worth a ticket, never a 3 a.m. page.
   - name: a slow leak opens a ticket but never pages

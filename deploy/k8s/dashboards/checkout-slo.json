@@ -183,7 +183,7 @@
       "id": 3,
       "type": "stat",
       "title": "Availability budget gone in",
-      "description": "If the current burn rate continues, how long until this budget is used up.",
+      "description": "If the current burn rate continues, how long until this budget is used up. More than a year shows as Not burning.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -200,7 +200,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "clamp_min(slo:period_error_budget_remaining:ratio{sloth_service=\"checkout\", sloth_slo=\"availability\"}, 0) * 2592000 / clamp_min(slo:current_burn_rate:ratio{sloth_service=\"checkout\", sloth_slo=\"availability\"}, 0.001)",
+          "expr": "clamp_min(slo:period_error_budget_remaining:ratio{sloth_service=\"checkout\", sloth_slo=\"availability\"}, 0) * 2592000 / on(sloth_service, sloth_slo) clamp_min(slo:current_burn_rate:ratio{sloth_service=\"checkout\", sloth_slo=\"availability\"}, 0.001)",
           "legendFormat": "",
           "refId": "A",
           "range": false,
@@ -240,7 +240,20 @@
               }
             ]
           },
-          "mappings": [],
+          "mappings": [
+            {
+              "type": "range",
+              "options": {
+                "from": 31536000,
+                "to": 1e+30,
+                "result": {
+                  "text": "Not burning",
+                  "color": "green",
+                  "index": 0
+                }
+              }
+            }
+          ],
           "decimals": 0
         },
         "overrides": []
@@ -384,7 +397,7 @@
       "id": 6,
       "type": "stat",
       "title": "Latency budget gone in",
-      "description": "If the current burn rate continues, how long until this budget is used up.",
+      "description": "If the current burn rate continues, how long until this budget is used up. More than a year shows as Not burning.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -401,7 +414,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "clamp_min(slo:period_error_budget_remaining:ratio{sloth_service=\"checkout\", sloth_slo=\"latency\"}, 0) * 2592000 / clamp_min(slo:current_burn_rate:ratio{sloth_service=\"checkout\", sloth_slo=\"latency\"}, 0.001)",
+          "expr": "clamp_min(slo:period_error_budget_remaining:ratio{sloth_service=\"checkout\", sloth_slo=\"latency\"}, 0) * 2592000 / on(sloth_service, sloth_slo) clamp_min(slo:current_burn_rate:ratio{sloth_service=\"checkout\", sloth_slo=\"latency\"}, 0.001)",
           "legendFormat": "",
           "refId": "A",
           "range": false,
@@ -441,7 +454,20 @@
               }
             ]
           },
-          "mappings": [],
+          "mappings": [
+            {
+              "type": "range",
+              "options": {
+                "from": 31536000,
+                "to": 1e+30,
+                "result": {
+                  "text": "Not burning",
+                  "color": "green",
+                  "index": 0
+                }
+              }
+            }
+          ],
           "decimals": 0
         },
         "overrides": []
