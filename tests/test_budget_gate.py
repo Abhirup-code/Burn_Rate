@@ -63,9 +63,13 @@ def test_report_lists_each_slo_as_a_percentage():
 
 class FakePrometheus(BaseHTTPRequestHandler):
     body = {}
+    objectives = None  # None: answer objective queries with the budget body
 
     def do_GET(self):
-        payload = json.dumps(self.body).encode()
+        body = self.body
+        if "slo%3Aobjective" in self.path and self.objectives is not None:
+            body = self.objectives
+        payload = json.dumps(body).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.end_headers()
@@ -77,6 +81,7 @@ class FakePrometheus(BaseHTTPRequestHandler):
 
 @pytest.fixture
 def prometheus():
+    FakePrometheus.objectives = None
     server = HTTPServer(("127.0.0.1", 0), FakePrometheus)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     yield f"http://127.0.0.1:{server.server_port}"
@@ -193,3 +198,20 @@ def test_json_marks_a_hotfix():
         decide([Budget("availability", -0.5)]), "Roll back release 1.4", "abhirup"
     )
     assert json.loads(g.as_json(d))["hotfix"] is True
+
+
+def test_an_slo_with_no_budget_yet_fails_closed(prometheus, capsys):
+    """CI found this: on a fresh lab the availability budget appeared late, and the
+    gate judged the deploy on latency alone."""
+    FakePrometheus.body = {
+        "status": "success",
+        "data": {"result": [result("latency", 1.0)]},
+    }
+    FakePrometheus.objectives = {
+        "status": "success",
+        "data": {"result": [result("availability", 0.995), result("latency", 0.95)]},
+    }
+    assert g.main(["--prometheus", prometheus]) == UNKNOWN
+    out = capsys.readouterr().out
+    assert "no budget data yet" in out
+    assert "| availability | no data |" in out

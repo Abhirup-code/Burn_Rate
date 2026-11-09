@@ -151,7 +151,7 @@ scripts/gate.sh --hotfix "Roll back release 1.4"   # a fix, recorded
 | Every SLO has budget left | 0 | Deploy |
 | Some SLO has under 25% left | 0 | Deploy, with a warning (and a yellow annotation in GitHub Actions) |
 | Any SLO's budget is used up | 1 | Blocked, naming the SLO |
-| No data, or Prometheus unreachable | 2 | Blocked: the gate fails closed |
+| No data, Prometheus unreachable, or an SLO with no budget yet | 2 | Blocked: the gate fails closed |
 | Blocked, but it is the fix | 0 | `--hotfix "reason"` lets it through and records who and why |
 
 It prints a Markdown report and adds it to the GitHub Actions job summary. Add `--json` for a

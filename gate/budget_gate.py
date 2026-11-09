@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
 import urllib.parse
@@ -27,6 +28,8 @@ import urllib.request
 from dataclasses import dataclass
 
 QUERY = 'slo:period_error_budget_remaining:ratio{{sloth_service="{service}"}}'
+# Every SLO Sloth knows about, so a missing budget is noticed rather than skipped.
+OBJECTIVES = 'slo:objective:ratio{{sloth_service="{service}"}}'
 ALLOW, BLOCK, UNKNOWN = 0, 1, 2
 
 
@@ -44,10 +47,9 @@ class Decision:
     low: tuple[str, ...] = ()  # SLOs still allowed, but close to running out
 
 
-def fetch_budgets(prometheus: str, service: str, timeout: float = 10.0) -> list[Budget]:
-    """Reads the remaining budget for every SLO of a service from Prometheus."""
+def _query(prometheus: str, promql: str, timeout: float) -> list[dict]:
     url = f"{prometheus.rstrip('/')}/api/v1/query?" + urllib.parse.urlencode(
-        {"query": QUERY.format(service=service)}
+        {"query": promql}
     )
     if not url.startswith(("http://", "https://")):
         raise ValueError("Prometheus URL must start with http:// or https://")
@@ -55,10 +57,22 @@ def fetch_budgets(prometheus: str, service: str, timeout: float = 10.0) -> list[
         body = json.load(resp)
     if body.get("status") != "success":
         raise RuntimeError(f"Prometheus query failed: {body.get('error', body)}")
-    return [
-        Budget(r["metric"].get("sloth_slo", "?"), float(r["value"][1]))
-        for r in body["data"]["result"]
-    ]
+    return body["data"]["result"]
+
+
+def fetch_budgets(prometheus: str, service: str, timeout: float = 10.0) -> list[Budget]:
+    """Reads the remaining budget for every SLO of a service from Prometheus.
+
+    An SLO that has an objective but no budget yet comes back as NaN, so the gate
+    fails closed on it instead of quietly judging the deploy on the other SLOs.
+    """
+    budgets = {
+        r["metric"].get("sloth_slo", "?"): float(r["value"][1])
+        for r in _query(prometheus, QUERY.format(service=service), timeout)
+    }
+    for r in _query(prometheus, OBJECTIVES.format(service=service), timeout):
+        budgets.setdefault(r["metric"].get("sloth_slo", "?"), math.nan)
+    return [Budget(slo, left) for slo, left in budgets.items()]
 
 
 def decide(
@@ -79,7 +93,7 @@ def decide(
         return Decision(
             UNKNOWN,
             tuple(budgets),
-            "An SLO has no data yet (NaN), so the gate cannot judge the deploy.",
+            "An SLO has no budget data yet, so the gate cannot judge the deploy.",
         )
     spent = [b for b in budgets if b.remaining <= min_remaining]
     if spent:
@@ -133,7 +147,11 @@ def report(decision: Decision) -> str:
     lines = [f"### {verdict}", "", decision.reason, ""]
     if decision.budgets:
         lines += ["| SLO | Error budget left |", "|---|---|"]
-        lines += [f"| {b.slo} | {b.remaining:.1%} |" for b in decision.budgets]
+        lines += [
+            f"| {b.slo} | "
+            f"{'no data' if b.remaining != b.remaining else f'{b.remaining:.1%}'} |"
+            for b in decision.budgets
+        ]
     return "\n".join(lines) + "\n"
 
 
