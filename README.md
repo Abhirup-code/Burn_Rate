@@ -55,7 +55,7 @@ flowchart LR
 - [x] **3. SLOs as code and multi-window burn-rate alerts**
 - [x] **4. Grafana SLO dashboard: budget left, burn rate, time to exhaustion**
 - [x] **5. Error-budget deploy gate, with a hotfix override**
-- [x] **6. Game day: break it on purpose, watch the alerts and the gate, write the postmortem** (the drill runs in CI; the first written postmortem is next)
+- [x] **6. Game day: break it on purpose, watch the alerts and the gate, write the postmortem** (the drill runs in CI; [first postmortem](docs/postmortems/2026-11-09-game-day-checkout-outage.md))
 
 ## SLOs as code and burn-rate alerts
 
@@ -172,15 +172,20 @@ postmortem:
 4. The gate **blocks** feature deploys, and lets a hotfix with a reason through.
 5. The fix goes in and the error rate drops back under budget.
 
-A real run against Prometheus with the generated rules:
+My first full run, on my laptop with kind:
 
 ```
-17:41:47 UTC  Incident starts: every checkout fails
-17:42:27 UTC  Detected: CheckoutAvailabilityBudgetBurn (page) fired 40s after the first failure
-17:42:27 UTC  Deploy gate blocks feature releases: error budget exhausted
-17:42:28 UTC  Hotfix allowed through the gate with a recorded reason
-17:47:39 UTC  Recovered: 5 minute error rate back under the 0.5% budget 311s after the fix
+20:25:28 UTC  Incident starts: every checkout fails
+20:26:32 UTC  Detected: CheckoutAvailabilityBudgetBurn (page) fired 61s after the first failure
+20:26:32 UTC  Deploy gate blocks feature releases: error budget exhausted
+20:26:33 UTC  Hotfix allowed through the gate with a recorded reason
+20:26:37 UTC  Mitigated: chaos switch off
+20:31:37 UTC  Recovered: 5 minute error rate back under the 0.5% budget 300s after the fix
 ```
+
+The write-up is in [the first postmortem](docs/postmortems/2026-11-09-game-day-checkout-outage.md).
+It also covers a real problem the run found: `make up` failed halfway on a busy laptop, so the
+setup now retries.
 
 The page itself clears later, once its 30 minute window recovers. That delay is deliberate: it
 keeps a flapping service from paging again and again.
@@ -251,7 +256,7 @@ scripts/chaos.sh 0.05 0 600 # 5% fail for 10 minutes, then it heals by itself
 **Check it end to end, or tear it down:**
 
 ```bash
-scripts/check.sh            # Prometheus is scraping checkout traffic
+scripts/check.sh            # Prometheus is scraping checkout traffic. Run it before any drill
 scripts/down.sh             # deletes the cluster
 ```
 
