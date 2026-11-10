@@ -87,9 +87,8 @@ def decide(
             (),
             "No SLO data in Prometheus, so the gate cannot tell if a deploy is safe.",
         )
-    if any(
-        b.remaining != b.remaining for b in budgets
-    ):  # NaN: no traffic in the window
+    # NaN means the SLO exists but has no traffic in the window yet.
+    if any(math.isnan(b.remaining) for b in budgets):
         return Decision(
             UNKNOWN,
             tuple(budgets),
@@ -149,7 +148,7 @@ def report(decision: Decision) -> str:
         lines += ["| SLO | Error budget left |", "|---|---|"]
         lines += [
             f"| {b.slo} | "
-            f"{'no data' if b.remaining != b.remaining else f'{b.remaining:.1%}'} |"
+            f"{'no data' if math.isnan(b.remaining) else f'{b.remaining:.1%}'} |"
             for b in decision.budgets
         ]
     return "\n".join(lines) + "\n"
@@ -167,7 +166,7 @@ def as_json(decision: Decision) -> str:
             "reason": decision.reason,
             # NaN (no data yet) is not valid JSON, so it becomes null.
             "budget_left": {
-                b.slo: None if b.remaining != b.remaining else b.remaining
+                b.slo: None if math.isnan(b.remaining) else b.remaining
                 for b in decision.budgets
             },
             "running_low": list(decision.low),

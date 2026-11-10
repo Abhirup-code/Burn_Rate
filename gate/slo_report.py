@@ -92,11 +92,11 @@ def collect(prometheus: str, service: str) -> list[SloStatus]:
 
 
 def pct(x: float) -> str:
-    return "no data" if x != x else f"{x:.1%}"
+    return "no data" if math.isnan(x) else f"{x:.1%}"
 
 
 def rate(x: float | None) -> str:
-    return "–" if x is None or x != x else f"{x:.1f}x"
+    return "–" if x is None or math.isnan(x) else f"{x:.1f}x"
 
 
 def duration(seconds: float | None) -> str:
