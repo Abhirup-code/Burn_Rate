@@ -76,6 +76,33 @@ def test_the_report_shows_state_burn_and_time_left(prometheus, capsys):
     assert "not at this pace | none |" in out
 
 
+def test_the_json_report_carries_the_same_numbers(prometheus, capsys):
+    outage()
+    assert r.main(["--prometheus", prometheus, "--service", "checkout", "--json"]) == 0
+    body = json.loads(capsys.readouterr().out)
+    assert body["service"] == "checkout" and body["period_days"] == 30
+    assert body["windows"] == list(r.WINDOWS)
+    availability, latency = body["slos"]
+    assert availability["slo"] == "availability"
+    assert availability["state"] == "low" and availability["budget_left"] == 0.2
+    assert availability["objective"] == 0.995
+    assert availability["burn"]["5m"] == 100.0  # 0.5 of a 0.005 budget
+    assert availability["alerts"] == ["page"]
+    assert round(availability["budget_gone_in_seconds"]) == round(0.2 * 30 * 86400 / 100)
+    assert latency["state"] == "ok" and latency["budget_gone_in_seconds"] is None
+
+
+def test_json_turns_missing_data_into_null(prometheus, capsys):
+    DATA.clear()
+    DATA["slo:objective:ratio"] = [("availability", 0.995, {})]
+    assert r.main(["--prometheus", prometheus, "--json"]) == 0
+    slo = json.loads(capsys.readouterr().out)["slos"][0]
+    assert slo["state"] == "no data"
+    assert slo["budget_left"] is None and slo["budget_gone_in_seconds"] is None
+    assert slo["burn"] == dict.fromkeys(r.WINDOWS)
+    assert slo["alerts"] == []
+
+
 def test_no_slos_is_an_error(prometheus, capsys):
     DATA.clear()
     assert r.main(["--prometheus", prometheus]) == 2

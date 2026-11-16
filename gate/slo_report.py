@@ -5,6 +5,7 @@ how fast it is burning over each alert window, and when it runs out at that pace
 Good for a weekly reliability review, a standup, or an incident channel.
 
     python -m gate.slo_report --prometheus http://127.0.0.1:9090 --service checkout
+    python -m gate.slo_report --json | jq '.slos[] | select(.state != "ok")'
 
 Exit codes: 0 printed, 2 could not read Prometheus or found no SLOs.
 """
@@ -137,6 +138,38 @@ def render(service: str, statuses: list[SloStatus]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def as_json(service: str, statuses: list[SloStatus]) -> str:
+    """The same report for other tools: a weekly review script, a chat bot, a dashboard.
+
+    NaN is not valid JSON, so anything with no data yet comes back as null.
+    """
+
+    def number(x: float | None) -> float | None:
+        return None if x is None or x != x else round(x, 6)
+
+    return json.dumps(
+        {
+            "service": service,
+            "period_days": PERIOD_SECONDS // 86400,
+            "windows": list(WINDOWS),
+            "slos": [
+                {
+                    "slo": s.slo,
+                    "objective": number(s.objective),
+                    "state": s.state,
+                    "budget_left": number(s.budget_left),
+                    "burn": {w: number(s.burn.get(w)) for w in WINDOWS},
+                    "budget_gone_in_seconds": number(s.gone_in()),
+                    "alerts": sorted(set(s.alerts)),
+                }
+                for s in statuses
+            ],
+        },
+        allow_nan=False,
+        indent=2,
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Print where every SLO stands.")
     parser.add_argument(
@@ -144,6 +177,9 @@ def main(argv: list[str] | None = None) -> int:
         default=os.environ.get("PROMETHEUS_URL", "http://127.0.0.1:9090"),
     )
     parser.add_argument("--service", default="checkout")
+    parser.add_argument(
+        "--json", action="store_true", help="Print one JSON object instead of the table"
+    )
     args = parser.parse_args(argv)
     try:
         statuses = collect(args.prometheus, args.service)
@@ -153,7 +189,7 @@ def main(argv: list[str] | None = None) -> int:
     if not statuses:
         print(f"No SLOs found for service {args.service!r}.", file=sys.stderr)
         return 2
-    print(render(args.service, statuses))
+    print(as_json(args.service, statuses) if args.json else render(args.service, statuses))
     return 0
 
 

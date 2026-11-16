@@ -133,6 +133,13 @@ scripts/slo-report.sh
 ```
 
 The burn columns are the same windows the alerts use, so you can see which alert is close to firing.
+
+Add `--json` for a script, a chat bot, or a dashboard. Anything with no data yet comes back as
+`null`, because NaN is not valid JSON:
+
+```bash
+scripts/slo-report.sh --json | jq '.slos[] | select(.state != "ok")'
+```
 The numbers above are from the report's unit test, not a real run.
 
 ## Alert routing
