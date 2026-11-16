@@ -7,7 +7,11 @@ Good for a weekly reliability review, a standup, or an incident channel.
     python -m gate.slo_report --prometheus http://127.0.0.1:9090 --service checkout
     python -m gate.slo_report --json | jq '.slos[] | select(.state != "ok")'
 
-Exit codes: 0 printed, 2 could not read Prometheus or found no SLOs.
+With --fail-below it also works as a check: a weekly cron or a CI job can fail while
+an SLO is running out of budget, instead of someone having to read the table.
+
+Exit codes: 0 printed (and nothing below the threshold), 1 an SLO is below --fail-below,
+2 could not read Prometheus or found no SLOs.
 """
 
 from __future__ import annotations
@@ -180,6 +184,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--json", action="store_true", help="Print one JSON object instead of the table"
     )
+    parser.add_argument(
+        "--fail-below",
+        type=float,
+        metavar="SHARE",
+        help="Exit 1 if any SLO has less than this share of budget left, e.g. 0.25",
+    )
     args = parser.parse_args(argv)
     try:
         statuses = collect(args.prometheus, args.service)
@@ -190,7 +200,16 @@ def main(argv: list[str] | None = None) -> int:
         print(f"No SLOs found for service {args.service!r}.", file=sys.stderr)
         return 2
     print(as_json(args.service, statuses) if args.json else render(args.service, statuses))
-    return 0
+    if args.fail_below is None:
+        return 0
+    # An SLO with no data yet counts as failing: the check cannot say it is healthy.
+    short = [s for s in statuses if not s.budget_left >= args.fail_below]
+    if short:
+        print(
+            f"Budget below {args.fail_below:.0%} for: {', '.join(s.slo for s in short)}",
+            file=sys.stderr,
+        )
+    return 1 if short else 0
 
 
 if __name__ == "__main__":

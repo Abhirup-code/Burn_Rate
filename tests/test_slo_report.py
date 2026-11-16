@@ -103,6 +103,26 @@ def test_json_turns_missing_data_into_null(prometheus, capsys):
     assert slo["alerts"] == []
 
 
+def test_fail_below_turns_the_report_into_a_check(prometheus, capsys):
+    outage()  # availability has 20% left, latency 97%
+    args = ["--prometheus", prometheus]
+    assert r.main([*args, "--fail-below", "0.1"]) == 0
+    assert r.main([*args, "--fail-below", "0.25"]) == 1
+    err = capsys.readouterr().err
+    assert "Budget below 25% for: availability" in err and "latency" not in err
+    # Exactly at the threshold is not below it.
+    assert r.main([*args, "--fail-below", "0.2"]) == 0
+    # Without the flag the report never fails on the numbers.
+    assert r.main(args) == 0
+
+
+def test_an_slo_with_no_data_fails_the_check(prometheus, capsys):
+    DATA.clear()
+    DATA["slo:objective:ratio"] = [("availability", 0.995, {})]
+    assert r.main(["--prometheus", prometheus, "--fail-below", "0.25"]) == 1
+    assert "Budget below 25% for: availability" in capsys.readouterr().err
+
+
 def test_no_slos_is_an_error(prometheus, capsys):
     DATA.clear()
     assert r.main(["--prometheus", prometheus]) == 2

@@ -140,6 +140,14 @@ Add `--json` for a script, a chat bot, or a dashboard. Anything with no data yet
 ```bash
 scripts/slo-report.sh --json | jq '.slos[] | select(.state != "ok")'
 ```
+
+`--fail-below` turns the report into a check, so a weekly job can fail while an SLO is running out
+of budget instead of waiting for someone to read the table. An SLO with no data yet counts as
+failing, because the check cannot call it healthy:
+
+```bash
+scripts/slo-report.sh --fail-below 0.25   # exit 1 under 25% budget left
+```
 The numbers above are from the report's unit test, not a real run.
 
 ## Alert routing
