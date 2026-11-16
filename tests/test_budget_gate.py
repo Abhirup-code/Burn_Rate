@@ -183,6 +183,7 @@ def test_json_output_for_other_tools(prometheus, capsys):
         "Only reliability fixes may deploy.",
         "budget_left": {"availability": -0.5, "latency": 0.2},
         "running_low": [],
+        "override": None,
     }
 
 
@@ -198,6 +199,49 @@ def test_json_marks_a_hotfix():
         decide([Budget("availability", -0.5)]), "Roll back release 1.4", "abhirup"
     )
     assert json.loads(g.as_json(d))["hotfix"] is True
+
+
+def test_an_override_records_who_why_and_what_went_out():
+    blocked = decide([Budget("availability", -0.5)])
+    sha = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+    d = g.apply_hotfix(blocked, "Roll back the bad 1.4 release", "abhirup", sha)
+    assert d.code == ALLOW
+    assert d.override.who == "abhirup" and d.override.ref == sha
+    assert d.override.blocked_reason == blocked.reason
+    # The long hash is shortened for people, and kept in full for machines.
+    assert "by abhirup (a1b2c3d)" in d.reason
+    assert "by abhirup (a1b2c3d)" in g.report(d)
+    assert json.loads(g.as_json(d))["override"] == {
+        "who": "abhirup",
+        "reason": "Roll back the bad 1.4 release",
+        "ref": sha,
+        "blocked_reason": blocked.reason,
+    }
+
+
+def test_a_tag_or_branch_is_recorded_as_written():
+    d = g.apply_hotfix(decide([Budget("a", -0.5)]), "Roll back release 1.4", "me", "v1.4.1")
+    assert "by me (v1.4.1)" in d.reason
+    assert g.short("v1.4.1") == "v1.4.1"
+    assert g.short("a1b2c3d4e5f60718293a4b5c6d7e8f901234567z") == "a1b2c3d4e5f60718293a4b5c6d7e8f901234567z"
+
+
+def test_an_override_without_a_ref_reads_as_before():
+    d = g.apply_hotfix(decide([Budget("a", -0.5)]), "Roll back release 1.4", "me", None)
+    assert d.reason.startswith("HOTFIX OVERRIDE by me: Roll back release 1.4.")
+    assert d.override.ref is None
+
+
+def test_main_records_the_commit_from_the_environment(prometheus, monkeypatch, capsys):
+    monkeypatch.setenv("GITHUB_SHA", "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678")
+    monkeypatch.setenv("HOTFIX_REASON", "Roll back the bad 1.4 release")
+    monkeypatch.setenv("GITHUB_ACTOR", "abhirup")
+    FakePrometheus.body = {
+        "status": "success",
+        "data": {"result": [result("availability", -0.5)]},
+    }
+    assert g.main(["--prometheus", prometheus]) == ALLOW
+    assert "by abhirup (a1b2c3d)" in capsys.readouterr().out
 
 
 def test_an_slo_with_no_budget_yet_fails_closed(prometheus, capsys):

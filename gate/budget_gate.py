@@ -11,7 +11,8 @@ SLO data). Code 2 also blocks: the gate fails closed.
 
 A hotfix may still go out while the budget is spent, because a reliability fix is
 exactly what a spent budget calls for. It needs --hotfix with a written reason, and
-the override is recorded in the report and the job summary for later review.
+the override is recorded in the report and the job summary for later review, together
+with who ran it and which commit went out.
 
     python -m gate.budget_gate --prometheus http://127.0.0.1:9090 --service checkout
 """
@@ -40,11 +41,31 @@ class Budget:
 
 
 @dataclass(frozen=True)
+class Override:
+    """Who deployed on a spent budget, why, and what went out."""
+
+    who: str
+    reason: str
+    ref: str | None = None
+    blocked_reason: str = ""
+
+    def line(self) -> str:
+        what = f" ({short(self.ref)})" if self.ref else ""
+        return f"HOTFIX OVERRIDE by {self.who}{what}: {self.reason}. Gate said: {self.blocked_reason}"
+
+
+def short(ref: str) -> str:
+    """A 40-character commit hash is noise in a report; 7 characters identify it."""
+    return ref[:7] if len(ref) == 40 and all(c in "0123456789abcdef" for c in ref.lower()) else ref
+
+
+@dataclass(frozen=True)
 class Decision:
     code: int
     budgets: tuple[Budget, ...]
     reason: str
     low: tuple[str, ...] = ()  # SLOs still allowed, but close to running out
+    override: Override | None = None  # set when a hotfix went out on a spent budget
 
 
 def _query(prometheus: str, promql: str, timeout: float) -> list[dict]:
@@ -114,8 +135,10 @@ def decide(
     return Decision(ALLOW, tuple(budgets), "Every SLO has error budget left.")
 
 
-def apply_hotfix(decision: Decision, reason: str | None, who: str) -> Decision:
-    """Lets a blocked hotfix through, only with a written reason, and records who."""
+def apply_hotfix(
+    decision: Decision, reason: str | None, who: str, ref: str | None = None
+) -> Decision:
+    """Lets a blocked hotfix through, only with a written reason, and records who and what."""
     if decision.code == ALLOW or reason is None:
         return decision
     reason = reason.strip()
@@ -125,11 +148,8 @@ def apply_hotfix(decision: Decision, reason: str | None, who: str) -> Decision:
             decision.budgets,
             decision.reason + " A hotfix override needs a reason of 10+ characters.",
         )
-    return Decision(
-        ALLOW,
-        decision.budgets,
-        f"HOTFIX OVERRIDE by {who}: {reason}. Gate said: {decision.reason}",
-    )
+    override = Override(who, reason, ref or None, decision.reason)
+    return Decision(ALLOW, decision.budgets, override.line(), override=override)
 
 
 def report(decision: Decision) -> str:
@@ -139,7 +159,7 @@ def report(decision: Decision) -> str:
         BLOCK: "⛔ Deploy blocked",
         UNKNOWN: "⚠️ Deploy blocked (no data)",
     }[decision.code]
-    if decision.reason.startswith("HOTFIX OVERRIDE"):
+    if decision.override:
         verdict = "🚑 Hotfix allowed while the budget is spent"
     elif decision.low:
         verdict = "🟡 Deploy allowed, budget running low"
@@ -162,8 +182,15 @@ def as_json(decision: Decision) -> str:
                 decision.code
             ],
             "exit_code": decision.code,
-            "hotfix": decision.reason.startswith("HOTFIX OVERRIDE"),
+            "hotfix": decision.override is not None,
             "reason": decision.reason,
+            "override": decision.override
+            and {
+                "who": decision.override.who,
+                "reason": decision.override.reason,
+                "ref": decision.override.ref,
+                "blocked_reason": decision.override.blocked_reason,
+            },
             # NaN (no data yet) is not valid JSON, so it becomes null.
             "budget_left": {
                 b.slo: None if math.isnan(b.remaining) else b.remaining
@@ -214,6 +241,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Print the decision as JSON instead of Markdown (the job summary stays)",
     )
+    parser.add_argument(
+        "--ref",
+        default=os.environ.get("GITHUB_SHA") or os.environ.get("GIT_COMMIT") or None,
+        help="What is being deployed; recorded with a hotfix override (default: $GITHUB_SHA)",
+    )
     args = parser.parse_args(argv)
     who = os.environ.get("GITHUB_ACTOR") or os.environ.get("USER") or "unknown"
 
@@ -227,7 +259,7 @@ def main(argv: list[str] | None = None) -> int:
         decision = Decision(
             UNKNOWN, (), f"Could not read the error budget from Prometheus: {exc}"
         )
-    decision = apply_hotfix(decision, args.hotfix, who)
+    decision = apply_hotfix(decision, args.hotfix, who, args.ref)
 
     text = report(decision)
     print(as_json(decision) if args.json else text)

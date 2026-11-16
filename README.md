@@ -157,6 +157,7 @@ Before a feature deploy, the gate asks Prometheus how much error budget is left:
 ```bash
 scripts/gate.sh                                 # deploy or block
 scripts/gate.sh --hotfix "Roll back release 1.4"   # a fix, recorded
+# in CI the commit is picked up from $GITHUB_SHA; pass --ref to name a tag or branch instead
 ```
 
 | Situation | Exit code | Result |
@@ -165,7 +166,7 @@ scripts/gate.sh --hotfix "Roll back release 1.4"   # a fix, recorded
 | Some SLO has under 25% left | 0 | Deploy, with a warning (and a yellow annotation in GitHub Actions) |
 | Any SLO's budget is used up | 1 | Blocked, naming the SLO |
 | No data, Prometheus unreachable, or an SLO with no budget yet | 2 | Blocked: the gate fails closed |
-| Blocked, but it is the fix | 0 | `--hotfix "reason"` lets it through and records who and why |
+| Blocked, but it is the fix | 0 | `--hotfix "reason"` lets it through and records who, why, and which commit |
 
 It prints a Markdown report and adds it to the GitHub Actions job summary. Add `--json` for a
 machine-readable answer, for example to feed a chat bot or another pipeline step:
