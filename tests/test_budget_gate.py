@@ -220,10 +220,13 @@ def test_an_override_records_who_why_and_what_went_out():
 
 
 def test_a_tag_or_branch_is_recorded_as_written():
-    d = g.apply_hotfix(decide([Budget("a", -0.5)]), "Roll back release 1.4", "me", "v1.4.1")
+    blocked = decide([Budget("a", -0.5)])
+    d = g.apply_hotfix(blocked, "Roll back release 1.4", "me", "v1.4.1")
     assert "by me (v1.4.1)" in d.reason
     assert g.short("v1.4.1") == "v1.4.1"
-    assert g.short("a1b2c3d4e5f60718293a4b5c6d7e8f901234567z") == "a1b2c3d4e5f60718293a4b5c6d7e8f901234567z"
+    # 40 characters, but z is not hex, so it is not a commit hash.
+    not_a_hash = "a1b2c3d4e5f60718293a4b5c6d7e8f901234567z"
+    assert g.short(not_a_hash) == not_a_hash
 
 
 def test_an_override_without_a_ref_reads_as_before():

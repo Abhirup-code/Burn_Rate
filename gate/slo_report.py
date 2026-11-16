@@ -199,14 +199,16 @@ def main(argv: list[str] | None = None) -> int:
     if not statuses:
         print(f"No SLOs found for service {args.service!r}.", file=sys.stderr)
         return 2
-    print(as_json(args.service, statuses) if args.json else render(args.service, statuses))
+    report = as_json if args.json else render
+    print(report(args.service, statuses))
     if args.fail_below is None:
         return 0
     # An SLO with no data yet counts as failing: the check cannot say it is healthy.
     short = [s for s in statuses if not s.budget_left >= args.fail_below]
     if short:
         print(
-            f"Budget below {args.fail_below:.0%} for: {', '.join(s.slo for s in short)}",
+            f"Budget below {args.fail_below:.0%} for: "
+            + ", ".join(s.slo for s in short),
             file=sys.stderr,
         )
     return 1 if short else 0

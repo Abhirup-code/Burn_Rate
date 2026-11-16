@@ -51,12 +51,16 @@ class Override:
 
     def line(self) -> str:
         what = f" ({short(self.ref)})" if self.ref else ""
-        return f"HOTFIX OVERRIDE by {self.who}{what}: {self.reason}. Gate said: {self.blocked_reason}"
+        return (
+            f"HOTFIX OVERRIDE by {self.who}{what}: {self.reason}. "
+            f"Gate said: {self.blocked_reason}"
+        )
 
 
 def short(ref: str) -> str:
     """A 40-character commit hash is noise in a report; 7 characters identify it."""
-    return ref[:7] if len(ref) == 40 and all(c in "0123456789abcdef" for c in ref.lower()) else ref
+    is_hash = len(ref) == 40 and all(c in "0123456789abcdef" for c in ref.lower())
+    return ref[:7] if is_hash else ref
 
 
 @dataclass(frozen=True)
@@ -138,7 +142,7 @@ def decide(
 def apply_hotfix(
     decision: Decision, reason: str | None, who: str, ref: str | None = None
 ) -> Decision:
-    """Lets a blocked hotfix through, only with a written reason, and records who and what."""
+    """Let a blocked hotfix through, only with a reason, recording who and what."""
     if decision.code == ALLOW or reason is None:
         return decision
     reason = reason.strip()
@@ -244,7 +248,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--ref",
         default=os.environ.get("GITHUB_SHA") or os.environ.get("GIT_COMMIT") or None,
-        help="What is being deployed; recorded with a hotfix override (default: $GITHUB_SHA)",
+        help="What is being deployed, recorded with an override (default: $GITHUB_SHA)",
     )
     args = parser.parse_args(argv)
     who = os.environ.get("GITHUB_ACTOR") or os.environ.get("USER") or "unknown"

@@ -88,7 +88,8 @@ def test_the_json_report_carries_the_same_numbers(prometheus, capsys):
     assert availability["objective"] == 0.995
     assert availability["burn"]["5m"] == 100.0  # 0.5 of a 0.005 budget
     assert availability["alerts"] == ["page"]
-    assert round(availability["budget_gone_in_seconds"]) == round(0.2 * 30 * 86400 / 100)
+    gone_in = availability["budget_gone_in_seconds"]
+    assert round(gone_in) == round(0.2 * 30 * 86400 / 100)
     assert latency["state"] == "ok" and latency["budget_gone_in_seconds"] is None
 
 
